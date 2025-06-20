@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Firebase Test - Accessible Guitar Tabs</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header>
+        <h1>Firebase Authentication Test</h1>
+        <p>Testing if Firebase authentication loads correctly</p>
+    </header>
+
+    <main>
+        <section>
+            <h2>Debug Information</h2>
+            <div id="debug-info">
+                <p>Checking Firebase status...</p>
+            </div>
+            
+            <button onclick="manuallyCreateAuthUI()">Manually Create Auth UI</button>
+        </section>
+    </main>
+
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+    
+    <!-- App Scripts -->
+    <script type="module" src="src/firebase-loader.js"></script>
+    <script type="module" src="src/app.js"></script>
+    
+    <script>
+        // Debug script to check Firebase status
+        function checkFirebaseStatus() {
+            const debugDiv = document.getElementById('debug-info');
+            let html = '<h3>Firebase Status:</h3>';
+            
+            html += '<p>Firebase SDK loaded: ' + (typeof firebase !== 'undefined' ? 'YES' : 'NO') + '</p>';
+            html += '<p>FirebaseAuth instance: ' + (typeof window.debugFirebaseAuth !== 'undefined' ? 'YES' : 'NO') + '</p>';
+            html += '<p>Auth section exists: ' + (document.getElementById('auth-section') ? 'YES' : 'NO') + '</p>';
+            html += '<p>Current pathname: ' + window.location.pathname + '</p>';
+            
+            debugDiv.innerHTML = html;
+        }
+        
+        // Check status after page loads
+        window.addEventListener('load', () => {
+            setTimeout(checkFirebaseStatus, 1000);
+        });
+        
+        function manuallyCreateAuthUI() {
+            if (window.debugFirebaseAuth && window.debugFirebaseAuth.addAuthSection) {
+                window.debugFirebaseAuth.addAuthSection();
+                checkFirebaseStatus();
+            } else {
+                alert('FirebaseAuth not available yet');
+            }
+        }
+    </script>
+</body>
+</html>

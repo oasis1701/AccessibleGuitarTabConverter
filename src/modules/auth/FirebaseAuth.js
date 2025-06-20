@@ -14,6 +14,7 @@ import { firebaseReady } from '../../firebase-loader.js';
  */
 export class FirebaseAuth {
   constructor() {
+    console.log('FirebaseAuth constructor called');
     this.auth = null;
     this.db = null;
     this.user = null;
@@ -28,6 +29,7 @@ export class FirebaseAuth {
    * Initialize when Firebase SDK is ready
    */
   async initializeWhenReady() {
+    console.log('Waiting for Firebase to be ready...');
     await firebaseReady;
     
     // Check if Firebase is loaded
@@ -36,6 +38,7 @@ export class FirebaseAuth {
       return;
     }
     
+    console.log('Firebase is ready, initializing auth...');
     this.init();
   }
 
@@ -92,11 +95,28 @@ export class FirebaseAuth {
    * Create authentication UI elements
    */
   createAuthUI() {
+    // Wait for DOM to be ready
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => this.createAuthUI());
+      return;
+    }
+
     // Add auth section to pages that need it
     const pages = ['index.html', 'converter.html', 'my-tabs.html'];
-    const currentPage = window.location.pathname.split('/').pop() || 'index.html';
+    const pathname = window.location.pathname;
+    const currentPage = pathname.split('/').pop() || 'index.html';
     
-    if (pages.some(page => currentPage.includes(page))) {
+    console.log('Current pathname:', pathname);
+    console.log('Current page:', currentPage);
+    
+    // Check if we're on a valid page (handle both dev server and production)
+    const isValidPage = pages.some(page => pathname.includes(page)) || 
+                       pathname === '/' || 
+                       pathname === '/converter' || 
+                       pathname === '/my-tabs' ||
+                       currentPage === '';
+    
+    if (isValidPage) {
       this.addAuthSection();
     }
   }
@@ -107,8 +127,11 @@ export class FirebaseAuth {
   addAuthSection() {
     // Check if auth section already exists
     if (document.getElementById('auth-section')) {
+      console.log('Auth section already exists');
       return;
     }
+
+    console.log('Creating auth section...');
 
     // Create auth section
     const authSection = document.createElement('div');
@@ -148,7 +171,11 @@ export class FirebaseAuth {
     // Insert after header on all pages
     const header = document.querySelector('header');
     if (header) {
+      console.log('Inserting auth section after header');
       header.insertAdjacentElement('afterend', authSection);
+    } else {
+      console.error('Header not found! Inserting at body start');
+      document.body.insertBefore(authSection, document.body.firstChild);
     }
 
     this.bindAuthEvents();
@@ -623,3 +650,8 @@ export class FirebaseAuth {
 
 // Export singleton instance
 export const firebaseAuth = new FirebaseAuth();
+
+// Also export to window for debugging
+if (typeof window !== 'undefined') {
+  window.debugFirebaseAuth = firebaseAuth;
+}

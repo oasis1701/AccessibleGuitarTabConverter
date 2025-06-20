@@ -8,12 +8,12 @@
  * In production, these would come from environment variables
  */
 export const firebaseConfig = {
-  apiKey: process.env.FIREBASE_API_KEY || "AIzaSyCqvmEZDGYmNXeUKVOuiSUCZZqchh2r5lA",
-  authDomain: process.env.FIREBASE_AUTH_DOMAIN || "guitar-tabs-a3880.firebaseapp.com",
-  projectId: process.env.FIREBASE_PROJECT_ID || "guitar-tabs-a3880",
-  storageBucket: process.env.FIREBASE_STORAGE_BUCKET || "guitar-tabs-a3880.firebasestorage.app",
-  messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID || "474698758806",
-  appId: process.env.FIREBASE_APP_ID || "1:474698758806:web:ee35517a868b93bb8960b7"
+  apiKey: "AIzaSyCqvmEZDGYmNXeUKVOuiSUCZZqchh2r5lA",
+  authDomain: "guitar-tabs-a3880.firebaseapp.com",
+  projectId: "guitar-tabs-a3880",
+  storageBucket: "guitar-tabs-a3880.firebasestorage.app",
+  messagingSenderId: "474698758806",
+  appId: "1:474698758806:web:ee35517a868b93bb8960b7"
 };
 
 /**

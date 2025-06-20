@@ -19,7 +19,8 @@ export default defineConfig(({ command }) => {
         input: {
           main: resolve(__dirname, 'index.html'),
           converter: resolve(__dirname, 'converter.html'),
-          myTabs: resolve(__dirname, 'my-tabs.html')
+          myTabs: resolve(__dirname, 'my-tabs.html'),
+          testFirebase: resolve(__dirname, 'test-firebase.html')
         }
       }
     },
