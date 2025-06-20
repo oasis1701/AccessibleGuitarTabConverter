@@ -60,6 +60,11 @@ export class MyTabsPage {
         this.handleTableKeyboard(e);
       });
     }
+
+    // Listen for tab updates from Firebase sync
+    window.addEventListener('tabsUpdated', () => {
+      this.displaySavedTabs();
+    });
   }
 
   /**

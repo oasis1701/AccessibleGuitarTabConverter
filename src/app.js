@@ -6,6 +6,7 @@
 import { TabConverter } from './modules/converter/TabConverter.js';
 import { LocalStorage } from './modules/storage/LocalStorage.js';
 import { notificationManager } from './modules/ui/components/NotificationManager.js';
+import { firebaseAuth } from './modules/auth/FirebaseAuth.js';
 import { getQueryParams, updateQueryParams, debounce } from './utils/helpers.js';
 import { validateConfig, isFeatureEnabled } from './config.js';
 import { ANIMATION_DURATIONS } from './utils/constants.js';
@@ -53,6 +54,9 @@ class AccessibleGuitarTabsApp {
 
     // Initialize keyboard shortcuts
     this.initKeyboardShortcuts();
+    
+    // Make firebaseAuth available globally for other modules
+    window.firebaseAuth = firebaseAuth;
     
     // Initialize service worker for offline support
     if (isFeatureEnabled('offlineMode')) {

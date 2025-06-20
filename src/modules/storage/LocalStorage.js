@@ -77,6 +77,14 @@ export class LocalStorage {
       }
 
       localStorage.setItem(STORAGE_KEYS.TABS, serialized);
+      
+      // Also save to Firebase if user is signed in
+      if (window.firebaseAuth && window.firebaseAuth.isSignedIn()) {
+        window.firebaseAuth.saveTabToCloud(tabToSave).catch(error => {
+          console.error('Firebase save failed:', error);
+        });
+      }
+      
       return tabToSave;
       
     } catch (error) {
@@ -100,6 +108,14 @@ export class LocalStorage {
       }
       
       localStorage.setItem(STORAGE_KEYS.TABS, JSON.stringify(filteredTabs));
+      
+      // Also delete from Firebase if user is signed in
+      if (window.firebaseAuth && window.firebaseAuth.isSignedIn()) {
+        window.firebaseAuth.deleteTabFromCloud(id).catch(error => {
+          console.error('Firebase delete failed:', error);
+        });
+      }
+      
       return true;
       
     } catch (error) {
