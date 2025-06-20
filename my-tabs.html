@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Tabs - Guitar Tab to Accessible Format</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header>
+        <nav class="top-nav">
+            <a href="index.html" class="nav-link">← Home</a>
+            <a href="converter.html" class="nav-link">New Tab</a>
+        </nav>
+        <h1>My Saved Tabs</h1>
+        <p>Your locally saved guitar tab conversions.</p>
+    </header>
+
+    <main>
+        <section class="saved-tabs-section">
+            <div class="tabs-header">
+                <h2>Saved Tabs</h2>
+                <button id="clear-all-btn" class="danger-button" style="display: none;">
+                    Clear All Tabs
+                </button>
+            </div>
+            
+            <div id="no-tabs-message" class="no-tabs-message">
+                <p>No saved tabs yet.</p>
+                <p><a href="converter.html">Convert your first tab</a> to get started!</p>
+            </div>
+
+            <div id="tabs-container" class="tabs-container">
+                <table id="tabs-table" class="tabs-table">
+                    <thead>
+                        <tr>
+                            <th>Tab Name</th>
+                            <th>Date Saved</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tabs-tbody">
+                        <!-- Tabs will be populated here -->
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>Built for accessible guitar learning. Use with any screen reader.</p>
+    </footer>
+
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+    
+    <!-- App Scripts -->
+    <script type="module" src="src/app.js"></script>
+</body>
+</html>

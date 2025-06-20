@@ -1,0 +1,42 @@
+#!/bin/bash
+
+# Simple deployment script for GitHub Pages
+# This creates a branch with just the built files
+
+echo "Building the application..."
+npm run build
+
+echo "Creating temporary directory..."
+mkdir -p temp_deploy
+
+echo "Copying built files..."
+cp -r dist/* temp_deploy/
+
+echo "Copying original files as fallback..."
+# Copy original implementation files
+cp index.html temp_deploy/index-original.html
+cp converter.html temp_deploy/converter-original.html
+cp my-tabs.html temp_deploy/my-tabs-original.html
+cp script.js temp_deploy/
+cp storage.js temp_deploy/
+cp firebase.js temp_deploy/
+cp styles.css temp_deploy/
+
+echo "Creating gh-pages branch..."
+git checkout --orphan gh-pages
+git rm -rf .
+cp -r temp_deploy/* .
+rm -rf temp_deploy
+
+echo "Committing files..."
+git add .
+git commit -m "Deploy to GitHub Pages"
+
+echo "Pushing to GitHub..."
+git push origin gh-pages --force
+
+echo "Switching back to main branch..."
+git checkout main
+
+echo "Deployment complete!"
+echo "Your site will be available at: https://[username].github.io/[repository]/"

@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tab Converter - Guitar Tab to Accessible Format</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header>
+        <nav class="top-nav">
+            <a href="index.html" class="nav-link">← Home</a>
+            <a href="my-tabs.html" class="nav-link">My Tabs</a>
+        </nav>
+        <h1>Guitar Tab Converter</h1>
+        <p>Convert guitar tablature into screen reader-friendly sequential note descriptions.</p>
+    </header>
+
+    <main>
+        <section class="input-section">
+            <h2>Input Guitar Tab</h2>
+            <label for="tab-input">Paste your guitar tab here:</label>
+            <textarea 
+                id="tab-input" 
+                rows="10" 
+                cols="80" 
+                placeholder="Paste your Ultimate Guitar tab format here..."
+                aria-describedby="input-help">
+            </textarea>
+            <div id="input-help" class="help-text">
+                Paste standard text-based guitar tabs (the format with dashes and numbers on string lines). Supports 6, 7, and 8 string guitars!
+            </div>
+        </section>
+
+        <section class="settings-section">
+            <h2>Conversion Settings</h2>
+            <fieldset>
+                <legend>Output Options</legend>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="include-timing" checked>
+                    <label for="include-timing">Include annotations (timing, lyrics, notes)</label>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="verbose-mode" checked>
+                    <label for="verbose-mode">Verbose descriptions (vs. compact format)</label>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="string-names" checked>
+                    <label for="string-names">Use string names (E, A, D, G, B, E) instead of numbers</label>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="technique-details" checked>
+                    <label for="technique-details">Include detailed technique descriptions</label>
+                </div>
+            </fieldset>
+        </section>
+
+        <section class="convert-section">
+            <button id="convert-btn" type="button" class="convert-button">
+                Convert Tab to Accessible Format
+            </button>
+            <button id="save-btn" type="button" class="save-button" disabled>
+                Save Tab
+            </button>
+        </section>
+
+        <section class="output-section">
+            <h2>Accessible Format Output</h2>
+            <label for="tab-output">Converted accessible description:</label>
+            <textarea 
+                id="tab-output" 
+                rows="15" 
+                cols="80" 
+                readonly
+                aria-describedby="output-help">
+            </textarea>
+            <div id="output-help" class="help-text">
+                The converted tab will appear here in sequential note description format.
+            </div>
+            <button id="copy-btn" type="button" class="copy-button" disabled>
+                Copy to Clipboard
+            </button>
+        </section>
+    </main>
+
+    <footer>
+        <p>Built for accessible guitar learning. Use with any screen reader.</p>
+    </footer>
+
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+    
+    <!-- App Scripts -->
+    <script type="module" src="src/app.js"></script>
+</body>
+</html>

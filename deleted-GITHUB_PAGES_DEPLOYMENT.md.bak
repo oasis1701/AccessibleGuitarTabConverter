@@ -1,0 +1,168 @@
+# GitHub Pages Deployment Guide
+
+## Quick Setup (Using GitHub Actions - Recommended)
+
+### 1. Push your code to GitHub
+```bash
+git init
+git add .
+git commit -m "Initial commit with refactored code"
+git branch -M main
+git remote add origin https://github.com/YOUR_USERNAME/AccessibleGuitarTabs.git
+git push -u origin main
+```
+
+### 2. Enable GitHub Pages in your repository
+1. Go to your repository on GitHub
+2. Click on **Settings** → **Pages**
+3. Under "Build and deployment", select:
+   - Source: **GitHub Actions**
+
+### 3. The workflow will automatically run
+- Every push to `main` branch will trigger a build and deploy
+- Check the "Actions" tab to see the deployment progress
+- Your site will be available at: `https://YOUR_USERNAME.github.io/AccessibleGuitarTabs/`
+
+## Alternative: Manual Deployment
+
+If you prefer to build locally and deploy manually:
+
+### 1. Build the project locally
+```bash
+npm install
+npm run build
+```
+
+### 2. Deploy using gh-pages package
+```bash
+npm install --save-dev gh-pages
+```
+
+Add to package.json scripts:
+```json
+"scripts": {
+  "deploy": "npm run build && gh-pages -d dist"
+}
+```
+
+Then deploy:
+```bash
+npm run deploy
+```
+
+## Important Configuration Changes
+
+### Base URL Configuration
+The `vite.config.js` has been updated to automatically set the correct base URL:
+- Development: `/`
+- Production (GitHub Pages): `/AccessibleGuitarTabs/`
+
+### Firebase Configuration (if using)
+Update your Firebase authorized domains:
+1. Go to Firebase Console → Authentication → Settings
+2. Add `YOUR_USERNAME.github.io` to authorized domains
+
+## Troubleshooting
+
+### 404 Errors on Page Refresh
+Create a `404.html` in your project root:
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Accessible Guitar Tabs</title>
+  <script>
+    // Redirect to index.html with the path as a query parameter
+    const path = window.location.pathname.replace('/AccessibleGuitarTabs', '');
+    window.location.replace('/AccessibleGuitarTabs/?redirect=' + path);
+  </script>
+</head>
+<body>
+  Redirecting...
+</body>
+</html>
+```
+
+### Module Loading Issues
+Ensure all script tags have `type="module"`:
+```html
+<script type="module" src="src/app.js"></script>
+```
+
+### CORS Issues with Firebase
+Add your GitHub Pages URL to Firebase authorized domains.
+
+## Using a Custom Domain
+
+If you have a custom domain:
+
+1. Create a `CNAME` file in project root with your domain:
+```
+yourdomain.com
+```
+
+2. Update `vite.config.js`:
+```javascript
+const base = command === 'build' ? '/' : '/';
+```
+
+3. Configure DNS settings with your domain provider
+
+## Development vs Production
+
+### Local Development
+```bash
+npm run dev
+# Opens at http://localhost:3000
+```
+
+### Production Build
+```bash
+npm run build
+# Creates optimized files in dist/
+```
+
+### Preview Production Build
+```bash
+npm run preview
+# Test the production build locally
+```
+
+## Continuous Deployment
+
+The GitHub Actions workflow automatically:
+1. Installs dependencies
+2. Builds the project
+3. Deploys to GitHub Pages
+4. Updates on every push to main branch
+
+To manually trigger deployment:
+1. Go to Actions tab
+2. Select "Deploy to GitHub Pages"
+3. Click "Run workflow"
+
+## Security Notes
+
+1. **Firebase Keys**: The Firebase config in the client is safe to expose (these are public keys)
+2. **Environment Variables**: For sensitive data, use GitHub Secrets
+3. **HTTPS**: GitHub Pages automatically provides HTTPS
+
+## Performance Optimization
+
+The build process automatically:
+- Minifies JavaScript and CSS
+- Generates source maps
+- Creates legacy bundles for older browsers
+- Optimizes assets
+
+## Monitoring
+
+After deployment, check:
+1. Console for any errors
+2. Network tab for failed requests  
+3. Application works with screen readers
+4. All pages load correctly
+
+Your accessible guitar tabs app is now live on GitHub Pages! 🎸
