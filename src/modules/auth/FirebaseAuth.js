@@ -243,7 +243,7 @@ export class FirebaseAuth {
 
       // Action code settings for email link
       const actionCodeSettings = {
-        url: window.location.origin + '/converter.html?emailLink=true',
+        url: window.location.origin + '/AccessibleGuitarTabConverter/converter.html?emailLink=true',
         handleCodeInApp: true
       };
 
