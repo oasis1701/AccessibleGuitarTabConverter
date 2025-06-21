@@ -58,6 +58,20 @@ class AccessibleGuitarTabsApp {
     // Make firebaseAuth available globally for other modules
     window.firebaseAuth = firebaseAuth;
     
+    // Add manual trigger for auth UI (useful for debugging)
+    window.showAuthUI = () => {
+      if (!document.getElementById('auth-section')) {
+        firebaseAuth.addAuthSection();
+      }
+    };
+    
+    // Ensure auth UI is created
+    setTimeout(() => {
+      if (!document.getElementById('auth-section') && document.querySelector('header')) {
+        firebaseAuth.addAuthSection();
+      }
+    }, 500);
+    
     // Initialize service worker for offline support
     if (isFeatureEnabled('offlineMode')) {
       this.initServiceWorker();
