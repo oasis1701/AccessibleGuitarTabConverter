@@ -1,0 +1,44 @@
+<!-- Firebase Auth Section Template -->
+<!-- This can be included directly in HTML files as a fallback -->
+<div id="auth-section" class="auth-section" style="display: none;">
+    <div id="auth-signed-out" class="auth-state" style="display: none;">
+        <h3>Sign In for Cloud Sync</h3>
+        <p>Save your tabs across all devices</p>
+        <div class="auth-buttons">
+            <button id="email-link-btn" class="auth-button">Sign In with Email</button>
+            <button id="google-auth-btn" class="auth-button google">Sign In with Google</button>
+        </div>
+        <div id="email-link-form" class="email-auth-form" style="display: none;">
+            <h4>Email Sign In</h4>
+            <p>Enter your email address and we'll send you a secure sign-in link.</p>
+            <input type="email" id="email-link-email" placeholder="Email" required>
+            <div class="auth-form-buttons">
+                <button id="send-link-btn" class="auth-button">Send Sign-In Link</button>
+                <button id="link-cancel" class="auth-link">Cancel</button>
+            </div>
+        </div>
+    </div>
+    
+    <div id="auth-signed-in" class="auth-state" style="display: none;">
+        <div class="user-info">
+            <span id="user-display-name">Welcome!</span>
+            <span id="connection-status" class="connection-status"></span>
+        </div>
+        <div class="auth-buttons">
+            <button id="sync-now-btn" class="auth-button small">Sync Now</button>
+            <button id="sign-out-btn" class="auth-button small">Sign Out</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Show the auth section once Firebase is loaded
+    window.addEventListener('load', () => {
+        setTimeout(() => {
+            const authSection = document.getElementById('auth-section');
+            if (authSection) {
+                authSection.style.display = 'block';
+            }
+        }, 1000);
+    });
+</script>

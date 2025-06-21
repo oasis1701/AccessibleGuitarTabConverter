@@ -12,7 +12,7 @@ if (typeof firebase === 'undefined') {
 }
 
 // Export a promise that resolves when Firebase is ready
-export const firebaseReady = new Promise((resolve) => {
+export const firebaseReady = window.firebaseLoaded || new Promise((resolve) => {
   if (typeof firebase !== 'undefined') {
     resolve();
   } else {

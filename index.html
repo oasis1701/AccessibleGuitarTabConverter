@@ -85,6 +85,19 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
     
+    <!-- Wait for Firebase to load -->
+    <script>
+        // This ensures Firebase is available before modules load
+        window.firebaseLoaded = new Promise((resolve) => {
+            const checkFirebase = setInterval(() => {
+                if (typeof firebase !== 'undefined') {
+                    clearInterval(checkFirebase);
+                    resolve();
+                }
+            }, 10);
+        });
+    </script>
+    
     <!-- App Scripts -->
     <script type="module" src="src/firebase-loader.js"></script>
     <script type="module" src="src/app.js"></script>

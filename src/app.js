@@ -72,6 +72,22 @@ class AccessibleGuitarTabsApp {
       }
     }, 500);
     
+    // Additional fallback for production environment
+    setTimeout(() => {
+      if (!document.getElementById('auth-section') && document.querySelector('header')) {
+        // Force create the auth section
+        const authCheck = setInterval(() => {
+          if (window.firebaseAuth && !document.getElementById('auth-section')) {
+            window.firebaseAuth.addAuthSection();
+            clearInterval(authCheck);
+          }
+        }, 1000);
+        
+        // Stop checking after 10 seconds
+        setTimeout(() => clearInterval(authCheck), 10000);
+      }
+    }, 2000);
+    
     // Initialize service worker for offline support
     if (isFeatureEnabled('offlineMode')) {
       this.initServiceWorker();
@@ -429,3 +445,13 @@ if (document.readyState === 'loading') {
 } else {
   new AccessibleGuitarTabsApp();
 }
+
+// Export initialization function for debugging
+window.initFirebaseAuth = () => {
+  if (window.firebaseAuth) {
+    window.firebaseAuth.addAuthSection();
+    return 'Firebase auth UI created';
+  } else {
+    return 'Firebase auth not loaded yet';
+  }
+};
