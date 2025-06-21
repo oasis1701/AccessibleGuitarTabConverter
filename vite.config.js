@@ -3,7 +3,7 @@ import legacy from '@vitejs/plugin-legacy';
 import { resolve } from 'path';
 
 export default defineConfig(({ command }) => {
-  const base = command === 'build' ? '/AccessibleGuitarTabs/' : '/';
+  const base = command === 'build' ? '/AccessibleGuitarTabConverter/' : '/';
   
   return {
     base,
