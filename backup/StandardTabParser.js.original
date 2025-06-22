@@ -14,32 +14,17 @@ export class StandardTabParser {
    * Parse tablature lines into structured data
    * @param {string[]} lines - All lines from the tab
    * @returns {Object} Parsed tab data with sequences and annotations
-   * @throws {Error} If parsing fails
    */
   parse(lines) {
-    try {
-      if (!lines || !Array.isArray(lines)) {
-        throw new Error('Invalid input: expected array of lines');
-      }
-
-      const tabLineGroups = this.identifyTabLines(lines);
-      
-      if (tabLineGroups.length === 0) {
-        throw new Error('No valid tab sections found. Please check your tab format.');
-      }
-
-      const annotations = this.extractAnnotations(lines);
-      const sequences = this.parseNoteSequences(tabLineGroups, annotations);
-      
-      return {
-        sequences,
-        annotations,
-        tabLineGroups
-      };
-    } catch (error) {
-      console.error('Parsing error:', error);
-      throw new Error(`Failed to parse tab: ${error.message}`);
-    }
+    const tabLineGroups = this.identifyTabLines(lines);
+    const annotations = this.extractAnnotations(lines);
+    const sequences = this.parseNoteSequences(tabLineGroups, annotations);
+    
+    return {
+      sequences,
+      annotations,
+      tabLineGroups
+    };
   }
 
   /**
@@ -57,15 +42,14 @@ export class StandardTabParser {
       return standardTabGroup;
     }
     
-    // Fall back to labeled tab format with context tracking
+    // Fall back to labeled tab format
     let currentGroup = [];
-    let currentContext = [];
     
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       
       if (isTabLine(line)) {
-        const stringInfo = this.identifyString(line, currentContext);
+        const stringInfo = this.identifyString(line);
         if (stringInfo) {
           currentGroup.push({
             content: line,
@@ -73,7 +57,6 @@ export class StandardTabParser {
             stringName: stringInfo.name,
             lineNumber: i
           });
-          currentContext.push(stringInfo.name);
         }
       } else if (currentGroup.length > 0) {
         // End of current tab group
@@ -81,7 +64,6 @@ export class StandardTabParser {
           tabLineGroups.push(currentGroup);
         }
         currentGroup = [];
-        currentContext = [];
       }
     }
     
@@ -217,54 +199,45 @@ export class StandardTabParser {
   }
 
   /**
-   * Identify string from a labeled tab line with context awareness
+   * Identify string from a labeled tab line
    * @param {string} line - Tab line with string label
-   * @param {Array} context - Previously identified strings for context
    * @returns {Object|null} String info with index and name
    * @private
    */
-  identifyString(line, context = []) {
+  identifyString(line) {
     const trimmed = line.trim();
     
-    // Extract the string label
-    const labelMatch = trimmed.match(/^([A-Ga-g]#?)\s*[:!|]/);
-    if (!labelMatch) return null;
+    // Common string indicators for 6, 7, and 8 string guitars
+    const stringPatterns = [
+      { pattern: /^e[\s]*[:!|]/, index: 0, name: 'E' },
+      { pattern: /^E[\s]*[:!|]/, index: 0, name: 'E' },
+      { pattern: /^B[\s]*[:!|]/, index: 1, name: 'B' },
+      { pattern: /^G[\s]*[:!|]/, index: 2, name: 'G' },
+      { pattern: /^D[\s]*[:!|]/, index: 3, name: 'D' },
+      { pattern: /^A[\s]*[:!|]/, index: 4, name: 'A' },
+      { pattern: /^E[\s]*[:!|]/, index: 5, name: 'E' },  // Low E
+      { pattern: /^B[\s]*[:!|]/, index: 6, name: 'B' },  // 7th string (low B)
+      { pattern: /^F#[\s]*[:!|]/, index: 7, name: 'F#' }, // 8th string
+      { pattern: /^F[\s]*[:!|]/, index: 7, name: 'F#' }   // Alternative notation
+    ];
     
-    const label = labelMatch[1];
-    const normalizedLabel = label.charAt(0).toUpperCase() + label.slice(1);
-    
-    // Use context to determine string position
-    if (normalizedLabel === 'E' || normalizedLabel === 'e') {
-      // Check context to determine if high E or low E
-      if (context.length === 0) {
-        // First string is likely high E
-        return { index: 0, name: 'high E' };
-      } else if (context.length >= 5) {
-        // After 5 strings, it's low E
-        return { index: 5, name: 'low E' };
-      } else {
-        // In between, default to high E
-        return { index: 0, name: 'high E' };
+    // Check each pattern
+    for (const sp of stringPatterns) {
+      if (sp.pattern.test(trimmed)) {
+        // For E and B strings, we need context to determine position
+        if (sp.name === 'E') {
+          // Could be high E (index 0) or low E (index 5)
+          // This is a heuristic - might need the full context to be certain
+          return { index: sp.index, name: sp.index === 0 ? 'high E' : 'low E' };
+        } else if (sp.name === 'B' && (sp.index === 1 || sp.index === 6)) {
+          // Could be regular B (index 1) or low B (index 6)
+          return { index: sp.index, name: sp.index === 1 ? 'B' : 'low B' };
+        }
+        return { index: sp.index, name: sp.name };
       }
-    } else if (normalizedLabel === 'B') {
-      // Check if this is regular B or low B (7-string)
-      if (context.includes('low E') || context.length >= 6) {
-        return { index: 6, name: 'low B' };
-      } else {
-        return { index: 1, name: 'B' };
-      }
-    } else {
-      // Standard mappings for other strings
-      const standardMap = {
-        'G': { index: 2, name: 'G' },
-        'D': { index: 3, name: 'D' },
-        'A': { index: 4, name: 'A' },
-        'F#': { index: 7, name: 'F#' },
-        'F': { index: 7, name: 'F#' }
-      };
-      
-      return standardMap[normalizedLabel] || null;
     }
+    
+    return null;
   }
 
   /**
@@ -410,26 +383,10 @@ export class StandardTabParser {
           string: stringLine.stringName,
           stringIndex: stringLine.stringIndex,
           fret: 'mute',
-          techniques: this.findTechniques(content, position, 1),
-          position: position
-        };
-      } else if (char === 'o' || char === 'O') {
-        // Open string notation
-        return {
-          string: stringLine.stringName,
-          stringIndex: stringLine.stringIndex,
-          fret: 0,
-          techniques: this.findTechniques(content, position, 1),
+          techniques: [],
           position: position
         };
       }
-      return null;
-    }
-    
-    // Validate fret number
-    const fret = parseInt(fretNum);
-    if (isNaN(fret) || fret < 0 || fret > 24) {
-      console.warn(`Invalid fret number: ${fretNum} at position ${position}`);
       return null;
     }
     
@@ -439,14 +396,14 @@ export class StandardTabParser {
     return {
       string: stringLine.stringName,
       stringIndex: stringLine.stringIndex,
-      fret: fret,
+      fret: parseInt(fretNum),
       techniques: techniques,
       position: position
     };
   }
 
   /**
-   * Find techniques around a note with expanded search
+   * Find techniques around a note
    * @param {string} content - Line content
    * @param {number} notePosition - Position of the note
    * @param {number} noteLength - Length of the fret number
@@ -466,51 +423,21 @@ export class StandardTabParser {
       '~': 'vibrato',
       't': 'tap',
       '^': 'bend',
-      'v': 'vibrato',
-      'x': 'mute',
-      '.': 'staccato',
-      '>': 'accent'
+      'v': 'whammy'
     };
     
-    // Expanded search radius
-    const searchRadius = 3;
-    const start = Math.max(0, notePosition - searchRadius);
-    const end = Math.min(content.length, notePosition + noteLength + searchRadius);
+    // Check characters immediately before and after the note
+    const checkPositions = [
+      notePosition - 1,
+      notePosition + noteLength
+    ];
     
-    // Check before the note
-    for (let i = notePosition - 1; i >= start; i--) {
-      const char = content[i];
-      if (techniqueMap[char] && !techniques.includes(techniqueMap[char])) {
-        techniques.push(techniqueMap[char]);
-      }
-      
-      // Check for multi-character techniques
-      if (i > 0 && content.substring(i - 1, i + 1) === 'PM') {
-        if (!techniques.includes('palm mute')) {
-          techniques.push('palm mute');
+    for (const pos of checkPositions) {
+      if (pos >= 0 && pos < content.length) {
+        const char = content[pos];
+        if (techniqueMap[char]) {
+          techniques.push(techniqueMap[char]);
         }
-      }
-    }
-    
-    // Check after the note
-    for (let i = notePosition + noteLength; i < end; i++) {
-      const char = content[i];
-      if (techniqueMap[char] && !techniques.includes(techniqueMap[char])) {
-        techniques.push(techniqueMap[char]);
-      }
-    }
-    
-    // Check for parentheses (ghost notes)
-    if (notePosition > 0 && notePosition + noteLength < content.length) {
-      if (content[notePosition - 1] === '(' && content[notePosition + noteLength] === ')') {
-        techniques.push('ghost note');
-      }
-    }
-    
-    // Check for harmonics notation <12>
-    if (notePosition > 0 && notePosition + noteLength < content.length) {
-      if (content[notePosition - 1] === '<' && content[notePosition + noteLength] === '>') {
-        techniques.push('harmonic');
       }
     }
     
