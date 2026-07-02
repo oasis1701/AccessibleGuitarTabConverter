@@ -55,43 +55,8 @@ class AccessibleGuitarTabsApp {
     // Initialize keyboard shortcuts
     this.initKeyboardShortcuts();
     
-    // Make firebaseAuth available globally for other modules
+    // Bridge used by LocalStorage for cloud writes (avoids an import cycle)
     window.firebaseAuth = firebaseAuth;
-    
-    // Add manual trigger for auth UI (useful for debugging)
-    window.showAuthUI = () => {
-      if (!document.getElementById('auth-section')) {
-        firebaseAuth.addAuthSection();
-      }
-    };
-    
-    // Ensure auth UI is created
-    setTimeout(() => {
-      if (!document.getElementById('auth-section') && document.querySelector('header')) {
-        firebaseAuth.addAuthSection();
-      }
-    }, 500);
-    
-    // Additional fallback for production environment
-    setTimeout(() => {
-      if (!document.getElementById('auth-section') && document.querySelector('header')) {
-        // Force create the auth section
-        const authCheck = setInterval(() => {
-          if (window.firebaseAuth && !document.getElementById('auth-section')) {
-            window.firebaseAuth.addAuthSection();
-            clearInterval(authCheck);
-          }
-        }, 1000);
-        
-        // Stop checking after 10 seconds
-        setTimeout(() => clearInterval(authCheck), 10000);
-      }
-    }, 2000);
-    
-    // Initialize service worker for offline support
-    if (isFeatureEnabled('offlineMode')) {
-      this.initServiceWorker();
-    }
   }
 
   /**
@@ -387,8 +352,7 @@ class AccessibleGuitarTabsApp {
    * Initialize home page
    */
   async initHomePage() {
-    // Add any home page specific initialization
-    console.log('Home page initialized');
+    // No page-specific behavior yet
   }
 
   /**
@@ -422,19 +386,6 @@ class AccessibleGuitarTabsApp {
     });
   }
 
-  /**
-   * Initialize service worker for offline support
-   */
-  async initServiceWorker() {
-    if ('serviceWorker' in navigator) {
-      try {
-        const registration = await navigator.serviceWorker.register('/sw.js');
-        console.log('Service Worker registered:', registration);
-      } catch (error) {
-        console.error('Service Worker registration failed:', error);
-      }
-    }
-  }
 }
 
 // Initialize app when DOM is ready
@@ -445,13 +396,3 @@ if (document.readyState === 'loading') {
 } else {
   new AccessibleGuitarTabsApp();
 }
-
-// Export initialization function for debugging
-window.initFirebaseAuth = () => {
-  if (window.firebaseAuth) {
-    window.firebaseAuth.addAuthSection();
-    return 'Firebase auth UI created';
-  } else {
-    return 'Firebase auth not loaded yet';
-  }
-};

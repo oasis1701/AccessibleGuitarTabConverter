@@ -15,6 +15,11 @@ body {
     margin: 0 auto;
 }
 
+/* The hidden attribute always wins over display rules */
+[hidden] {
+    display: none !important;
+}
+
 /* Skip link for keyboard navigation */
 .skip-link {
     position: absolute;
@@ -629,7 +634,7 @@ footer {
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
-.auth-state h3 {
+.auth-section h2 {
     color: #2c5aa0;
     margin-bottom: 10px;
     font-size: 1.3em;
@@ -701,9 +706,11 @@ footer {
     border: 1px solid #dee2e6;
 }
 
-.email-auth-form h4 {
+.email-auth-form label {
+    display: block;
     color: #495057;
-    margin-bottom: 15px;
+    font-weight: 600;
+    margin-bottom: 6px;
 }
 
 .email-auth-form input {

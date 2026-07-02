@@ -6,6 +6,7 @@
 import { STORAGE_KEYS } from '../../utils/constants.js';
 import { generateId } from '../../utils/helpers.js';
 import { validateTabData } from '../../utils/validators.js';
+import { notificationManager } from '../ui/components/NotificationManager.js';
 
 /**
  * Class to manage local storage operations for tabs
@@ -78,10 +79,14 @@ export class LocalStorage {
 
       localStorage.setItem(STORAGE_KEYS.TABS, serialized);
       
-      // Also save to Firebase if user is signed in
+      // Also save to Firebase if user is signed in. The local save above is
+      // the source of truth; a cloud failure is only worth a warning.
       if (window.firebaseAuth && window.firebaseAuth.isSignedIn()) {
         window.firebaseAuth.saveTabToCloud(tabToSave).catch(error => {
           console.error('Firebase save failed:', error);
+          notificationManager.warning(
+            'Saved on this device. Cloud backup failed — press Sync now to retry later.'
+          );
         });
       }
       
@@ -113,6 +118,9 @@ export class LocalStorage {
       if (window.firebaseAuth && window.firebaseAuth.isSignedIn()) {
         window.firebaseAuth.deleteTabFromCloud(id).catch(error => {
           console.error('Firebase delete failed:', error);
+          notificationManager.warning(
+            'Deleted on this device. The cloud copy could not be removed — press Sync now to retry later.'
+          );
         });
       }
       

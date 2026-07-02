@@ -1,33 +1,27 @@
 /**
- * @fileoverview Firebase SDK loader - ensures Firebase is loaded before app initialization
+ * @fileoverview Firebase SDK loader - resolves once the compat SDK global
+ * exists, or gives up quietly after five seconds so the app can run
+ * local-only when the CDN is unreachable.
  * @module firebase-loader
  */
 
-// This file ensures Firebase SDK is loaded before the app starts
-// It's imported directly in the HTML files before app.js
-
-// Check if Firebase is already loaded
-if (typeof firebase === 'undefined') {
-  console.warn('Firebase SDK not loaded. Make sure Firebase scripts are included before this module.');
-}
-
-// Export a promise that resolves when Firebase is ready
-export const firebaseReady = window.firebaseLoaded || new Promise((resolve) => {
+export const firebaseReady = new Promise(resolve => {
   if (typeof firebase !== 'undefined') {
     resolve();
-  } else {
-    // Wait for Firebase to load
-    let checkCount = 0;
-    const checkInterval = setInterval(() => {
-      checkCount++;
-      if (typeof firebase !== 'undefined') {
-        clearInterval(checkInterval);
-        resolve();
-      } else if (checkCount > 50) { // 5 seconds timeout
-        clearInterval(checkInterval);
-        console.error('Firebase SDK failed to load');
-        resolve(); // Resolve anyway to not block the app
-      }
-    }, 100);
+    return;
   }
+
+  let checkCount = 0;
+  const checkInterval = setInterval(() => {
+    checkCount++;
+    if (typeof firebase !== 'undefined') {
+      clearInterval(checkInterval);
+      resolve();
+    } else if (checkCount > 50) {
+      // 5 seconds
+      clearInterval(checkInterval);
+      console.warn('Firebase SDK did not load; continuing with local storage only.');
+      resolve();
+    }
+  }, 100);
 });

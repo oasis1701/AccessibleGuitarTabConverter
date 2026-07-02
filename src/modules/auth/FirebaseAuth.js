@@ -1,10 +1,22 @@
 /**
- * @fileoverview Firebase authentication and cloud sync management
+ * @fileoverview Firebase authentication and cloud sync management.
+ *
+ * Cloud sync is strictly optional: the app is fully usable signed out, and
+ * nothing here announces errors on ordinary page loads. Errors are only
+ * announced inside flows the user started (signing in, signing out,
+ * pressing Sync Now, opening an email sign-in link).
+ *
+ * Sync never overwrites local tabs wholesale. Lists are reconciled with
+ * mergeTabs(): newer copies win, tabs the cloud never had are pushed up,
+ * and only tabs known to have been synced before are removed when they
+ * disappear from the cloud (a deletion made on another device).
+ *
  * @module auth/FirebaseAuth
  */
 
 import { firebaseConfig } from '../../config.js';
 import { LocalStorage } from '../storage/LocalStorage.js';
+import { mergeTabs } from '../storage/mergeTabs.js';
 import { notificationManager } from '../ui/components/NotificationManager.js';
 import { STORAGE_KEYS, FIREBASE_COLLECTIONS } from '../../utils/constants.js';
 import { firebaseReady } from '../../firebase-loader.js';
@@ -18,50 +30,50 @@ export class FirebaseAuth {
     this.db = null;
     this.user = null;
     this.unsubscribe = null;
+    this.available = false;
     this.isOnline = navigator.onLine;
-    
-    // Initialize after Firebase is ready
+
     this.initializeWhenReady();
   }
 
   /**
-   * Initialize when Firebase SDK is ready
+   * Initialize once the Firebase SDK is ready. If the SDK never loads
+   * (offline, CDN blocked), the app silently stays local-only.
    */
   async initializeWhenReady() {
     await firebaseReady;
-    
-    // Check if Firebase is loaded
+
     if (typeof firebase === 'undefined') {
-      console.error('Firebase SDK not loaded');
+      console.warn('Firebase SDK not loaded; running with local storage only.');
       return;
     }
-    
+
     this.init();
   }
 
   /**
-   * Initialize Firebase
+   * Initialize Firebase quietly. Never announces on failure — cloud sync
+   * is an optional extra, not something to alarm the user about on load.
    */
   async init() {
     try {
-      // Initialize Firebase
-      firebase.initializeApp(firebaseConfig);
+      if (!firebase.apps.length) {
+        firebase.initializeApp(firebaseConfig);
+      }
       this.auth = firebase.auth();
       this.db = firebase.firestore();
+      this.available = true;
 
-      // Enable offline persistence
       try {
         await this.db.enablePersistence();
       } catch (err) {
-        console.log('Offline persistence not available:', err.code);
+        console.warn('Offline persistence not available:', err.code);
       }
 
-      // Listen for auth state changes
-      this.auth.onAuthStateChanged((user) => {
+      this.auth.onAuthStateChanged(user => {
         this.handleAuthStateChange(user);
       });
 
-      // Listen for online/offline status
       window.addEventListener('online', () => {
         this.isOnline = true;
         this.updateConnectionStatus();
@@ -72,94 +84,71 @@ export class FirebaseAuth {
         this.updateConnectionStatus();
       });
 
-      this.setupUI();
-      
+      this.renderAuthSection();
+      this.updateAuthUI();
     } catch (error) {
-      console.error('Firebase initialization error:', error);
-      notificationManager.error('Failed to initialize cloud sync. Using local storage only.');
+      console.warn('Cloud sync unavailable, using local storage only:', error);
+      this.available = false;
     }
   }
 
   /**
-   * Set up authentication UI
+   * Fill the static #auth-section placeholder with the sign-in UI.
+   * The section lives inside <main>, so it is part of the landmark
+   * structure, and its heading is an h2 to keep heading order intact.
    */
-  setupUI() {
-    this.createAuthUI();
-    this.updateAuthUI();
-  }
-
-  /**
-   * Create authentication UI elements
-   */
-  createAuthUI() {
-    // Wait for DOM to be ready
+  renderAuthSection() {
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', () => this.createAuthUI());
+      document.addEventListener('DOMContentLoaded', () => this.renderAuthSection());
       return;
     }
 
-    // Always add auth section on any page with a header
-    // This is simpler and more reliable than path checking
-    setTimeout(() => {
-      if (!document.getElementById('auth-section') && document.querySelector('header')) {
-        this.addAuthSection();
-      }
-    }, 100); // Small delay to ensure DOM is fully ready
-  }
-
-  /**
-   * Add authentication section to the page
-   */
-  addAuthSection() {
-    // Check if auth section already exists
-    if (document.getElementById('auth-section')) {
-      return;
+    let section = document.getElementById('auth-section');
+    if (!section) {
+      const main = document.querySelector('main');
+      if (!main) return;
+      section = document.createElement('section');
+      section.id = 'auth-section';
+      section.className = 'auth-section';
+      section.setAttribute('aria-labelledby', 'auth-heading');
+      main.appendChild(section);
     }
 
-    // Create auth section
-    const authSection = document.createElement('div');
-    authSection.id = 'auth-section';
-    authSection.className = 'auth-section';
-    authSection.innerHTML = `
-      <div id="auth-signed-out" class="auth-state" style="display: none;">
-        <h3>Sign In for Cloud Sync</h3>
-        <p>Save your tabs across all devices</p>
+    if (section.dataset.rendered) return;
+    section.dataset.rendered = 'true';
+
+    section.innerHTML = `
+      <h2 id="auth-heading">Cloud Sync</h2>
+      <div id="auth-signed-out" class="auth-state" hidden>
+        <p>Optional: sign in to back up your saved tabs and use them on other devices. Everything also works without signing in.</p>
         <div class="auth-buttons">
-          <button id="email-link-btn" class="auth-button">Sign In with Email</button>
-          <button id="google-auth-btn" class="auth-button google">Sign In with Google</button>
+          <button id="email-link-btn" class="auth-button" type="button">Sign in with email</button>
+          <button id="google-auth-btn" class="auth-button google" type="button">Sign in with Google</button>
         </div>
-        <div id="email-link-form" class="email-auth-form" style="display: none;">
-          <h4>Email Sign In</h4>
-          <p>Enter your email address and we'll send you a secure sign-in link.</p>
-          <input type="email" id="email-link-email" placeholder="Email" required>
+        <div id="email-link-form" class="email-auth-form" hidden>
+          <p>We'll email you a secure sign-in link. No password needed.</p>
+          <label for="email-link-email">Email address</label>
+          <input type="email" id="email-link-email" autocomplete="email" required>
           <div class="auth-form-buttons">
-            <button id="send-link-btn" class="auth-button">Send Sign-In Link</button>
-            <button id="link-cancel" class="auth-link">Cancel</button>
+            <button id="send-link-btn" class="auth-button" type="button">Send sign-in link</button>
+            <button id="link-cancel" class="auth-link" type="button">Cancel</button>
           </div>
         </div>
       </div>
-      
-      <div id="auth-signed-in" class="auth-state" style="display: none;">
+
+      <div id="auth-signed-in" class="auth-state" hidden>
         <div class="user-info">
-          <span id="user-display-name">Welcome!</span>
+          <span id="user-display-name">Signed in</span>
           <span id="connection-status" class="connection-status"></span>
         </div>
         <div class="auth-buttons">
-          <button id="sync-now-btn" class="auth-button small">Sync Now</button>
-          <button id="sign-out-btn" class="auth-button small">Sign Out</button>
+          <button id="sync-now-btn" class="auth-button small" type="button">Sync now</button>
+          <button id="sign-out-btn" class="auth-button small" type="button">Sign out</button>
         </div>
       </div>
     `;
 
-    // Insert after header on all pages
-    const header = document.querySelector('header');
-    if (header) {
-      header.insertAdjacentElement('afterend', authSection);
-    } else {
-      // If no header, insert at body start
-      document.body.insertBefore(authSection, document.body.firstChild);
-    }
-
+    section.hidden = false;
     this.bindAuthEvents();
   }
 
@@ -167,135 +156,131 @@ export class FirebaseAuth {
    * Bind authentication event handlers
    */
   bindAuthEvents() {
-    // Email link button
     document.getElementById('email-link-btn')?.addEventListener('click', () => {
-      this.hideAllForms();
-      document.getElementById('email-link-form').style.display = 'block';
+      const form = document.getElementById('email-link-form');
+      form.hidden = false;
       document.getElementById('email-link-email').focus();
     });
 
-    // Google auth button
     document.getElementById('google-auth-btn')?.addEventListener('click', () => {
       this.signInWithGoogle();
     });
 
-    // Send sign-in link
-    document.getElementById('send-link-btn')?.addEventListener('click', (e) => {
-      e.preventDefault();
+    document.getElementById('send-link-btn')?.addEventListener('click', () => {
       this.sendSignInLink();
     });
 
-    // Cancel email link form
-    document.getElementById('link-cancel')?.addEventListener('click', (e) => {
-      e.preventDefault();
+    document.getElementById('link-cancel')?.addEventListener('click', () => {
       this.hideAllForms();
+      document.getElementById('email-link-btn')?.focus();
     });
 
-    // Sign out
     document.getElementById('sign-out-btn')?.addEventListener('click', () => {
       this.signOut();
     });
 
-    // Manual sync
     document.getElementById('sync-now-btn')?.addEventListener('click', () => {
       this.syncTabs();
     });
 
-    // Enter key on email link form
-    document.getElementById('email-link-email')?.addEventListener('keypress', (e) => {
+    document.getElementById('email-link-email')?.addEventListener('keydown', e => {
       if (e.key === 'Enter') {
+        e.preventDefault();
         this.sendSignInLink();
       }
     });
   }
 
   /**
-   * Hide all authentication forms
+   * Hide the email sign-in form
    */
   hideAllForms() {
     const emailForm = document.getElementById('email-link-form');
-    if (emailForm) {
-      emailForm.style.display = 'none';
-    }
+    if (emailForm) emailForm.hidden = true;
   }
 
   /**
-   * Send sign-in link to email
+   * Send a passwordless sign-in link to the entered email address
    */
   async sendSignInLink() {
     const emailInput = document.getElementById('email-link-email');
     const email = emailInput?.value.trim();
-    
+
     if (!email) {
       notificationManager.error('Please enter your email address');
+      emailInput?.focus();
       return;
     }
 
     if (!this.isValidEmail(email)) {
       notificationManager.error('Please enter a valid email address');
+      emailInput?.focus();
       return;
     }
 
+    const sendBtn = document.getElementById('send-link-btn');
     try {
-      const sendBtn = document.getElementById('send-link-btn');
       sendBtn.textContent = 'Sending...';
       sendBtn.disabled = true;
 
-      // Action code settings for email link
+      // Redirect back to the converter page next to the current page, so
+      // the link works on localhost and on GitHub Pages alike.
+      const directory = window.location.pathname.replace(/[^/]*$/, '');
       const actionCodeSettings = {
-        url: window.location.origin + '/AccessibleGuitarTabConverter/converter.html?emailLink=true',
+        url: `${window.location.origin}${directory}converter.html?emailLink=true`,
         handleCodeInApp: true
       };
 
       await this.auth.sendSignInLinkToEmail(email, actionCodeSettings);
-      
-      // Save email to localStorage for verification
+
+      // Save email to localStorage for verification when the link opens
       localStorage.setItem(STORAGE_KEYS.EMAIL_FOR_SIGNIN, email);
-      
-      notificationManager.success(`Sign-in link sent to ${email}! Check your email and click the link to access your account.`);
+
+      notificationManager.success(
+        `Sign-in link sent to ${email}. Check your email and open the link to finish signing in.`
+      );
       this.hideAllForms();
-      
     } catch (error) {
       console.error('Sign-in link error:', error);
-      notificationManager.error('Failed to send sign-in link: ' + this.getAuthErrorMessage(error.code));
+      notificationManager.error(
+        'Failed to send sign-in link: ' + this.getAuthErrorMessage(error.code)
+      );
     } finally {
-      const sendBtn = document.getElementById('send-link-btn');
       if (sendBtn) {
-        sendBtn.textContent = 'Send Sign-In Link';
+        sendBtn.textContent = 'Send sign-in link';
         sendBtn.disabled = false;
       }
     }
   }
 
   /**
-   * Handle email link sign-in
+   * Complete sign-in when the page was opened from an email link
    */
   async handleEmailLinkSignIn() {
-    // Check if the URL contains an email link
-    if (this.auth.isSignInWithEmailLink(window.location.href)) {
-      let email = localStorage.getItem(STORAGE_KEYS.EMAIL_FOR_SIGNIN);
-      
-      // If email is not available, prompt user
-      if (!email) {
-        email = prompt('Please provide your email for confirmation:');
-      }
-      
-      if (email) {
-        try {
-          await this.auth.signInWithEmailLink(email, window.location.href);
-          localStorage.removeItem(STORAGE_KEYS.EMAIL_FOR_SIGNIN);
-          
-          // Clean up URL
-          const url = new URL(window.location);
-          url.search = '';
-          window.history.replaceState({}, document.title, url.toString());
-          
-          notificationManager.success('Successfully signed in! Welcome to your account.');
-        } catch (error) {
-          console.error('Email link sign-in error:', error);
-          notificationManager.error('Failed to sign in with email link: ' + error.message);
-        }
-      }
+    if (!this.auth.isSignInWithEmailLink(window.location.href)) return;
+
+    let email = localStorage.getItem(STORAGE_KEYS.EMAIL_FOR_SIGNIN);
+
+    // If email is not available (link opened on another device), ask for it
+    if (!email) {
+      email = prompt('Please confirm your email address to finish signing in:');
+    }
+
+    if (!email) return;
+
+    try {
+      await this.auth.signInWithEmailLink(email, window.location.href);
+      localStorage.removeItem(STORAGE_KEYS.EMAIL_FOR_SIGNIN);
+
+      // Clean up URL
+      const url = new URL(window.location);
+      url.search = '';
+      window.history.replaceState({}, document.title, url.toString());
+
+      notificationManager.success('Signed in successfully.');
+    } catch (error) {
+      console.error('Email link sign-in error:', error);
+      notificationManager.error('Failed to sign in with email link: ' + error.message);
     }
   }
 
@@ -327,7 +312,7 @@ export class FirebaseAuth {
   async signOut() {
     try {
       await this.auth.signOut();
-      notificationManager.success('Signed out successfully');
+      notificationManager.success('Signed out. Your tabs stay saved on this device.');
     } catch (error) {
       notificationManager.error('Sign out failed: ' + error.message);
     }
@@ -342,8 +327,7 @@ export class FirebaseAuth {
     this.updateAuthUI();
 
     if (user) {
-      this.setupTabSync();
-      this.migrateLocalTabs();
+      this.initialSync().then(() => this.setupTabSync());
     } else {
       this.stopTabSync();
       // Check for email link sign-in when not authenticated
@@ -362,18 +346,16 @@ export class FirebaseAuth {
     if (!signedOut || !signedIn) return;
 
     if (this.user) {
-      signedOut.style.display = 'none';
-      signedIn.style.display = 'block';
-      
-      const displayName = this.user.displayName || this.user.email || 'User';
-      userDisplayName.textContent = `Welcome, ${displayName}!`;
-      
+      signedOut.hidden = true;
+      signedIn.hidden = false;
+
+      const displayName = this.user.displayName || this.user.email || 'your account';
+      userDisplayName.textContent = `Signed in as ${displayName}`;
+
       this.updateConnectionStatus();
     } else {
-      signedOut.style.display = 'block';
-      signedIn.style.display = 'none';
-      
-      // Hide email form when signed out
+      signedOut.hidden = false;
+      signedIn.hidden = true;
       this.hideAllForms();
     }
   }
@@ -386,30 +368,121 @@ export class FirebaseAuth {
     if (!statusEl) return;
 
     if (!this.isOnline) {
-      statusEl.textContent = '(Offline)';
+      statusEl.textContent = '(offline — changes sync when back online)';
       statusEl.className = 'connection-status offline';
     } else {
-      statusEl.textContent = '(Synced)';
+      statusEl.textContent = '(synced)';
       statusEl.className = 'connection-status online';
     }
   }
 
   /**
-   * Set up tab synchronization
+   * Firestore collection holding the current user's tabs
+   * @returns {Object} Firestore collection reference
+   */
+  tabsCollection() {
+    return this.db
+      .collection(FIREBASE_COLLECTIONS.USERS)
+      .doc(this.user.uid)
+      .collection(FIREBASE_COLLECTIONS.TABS);
+  }
+
+  /**
+   * Firestore document payload for a tab (no undefined values)
+   * @param {Object} tab - Tab data
+   * @returns {Object} Cloud document data
+   */
+  toCloudDoc(tab) {
+    const now = new Date().toISOString();
+    return {
+      name: tab.name,
+      originalTab: tab.originalTab,
+      convertedTab: tab.convertedTab,
+      settings: tab.settings || {},
+      dateCreated: tab.dateCreated || now,
+      dateModified: tab.dateModified || tab.dateCreated || now
+    };
+  }
+
+  /** localStorage key remembering which tab ids this account has synced. */
+  syncedIdsKey() {
+    return `guitar_tabs_synced_ids_${this.user.uid}`;
+  }
+
+  /** Ids known to have been in this account's cloud collection before. */
+  getSyncedIds() {
+    try {
+      const stored = localStorage.getItem(this.syncedIdsKey());
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** Persist the synced-ids ledger. */
+  setSyncedIds(ids) {
+    localStorage.setItem(this.syncedIdsKey(), JSON.stringify(ids));
+  }
+
+  /**
+   * Reconcile local and cloud tabs and push anything the cloud is missing.
+   * Runs on sign-in and when Sync Now is pressed.
+   * @returns {Promise<number>} Total number of tabs after the merge
+   */
+  async reconcile() {
+    const snapshot = await this.tabsCollection().get();
+    const cloudTabs = [];
+    snapshot.forEach(doc => {
+      cloudTabs.push({ id: doc.id, ...doc.data() });
+    });
+
+    const localTabs = LocalStorage.getAllTabs();
+    const { merged, toPush, syncedIds } = mergeTabs(
+      localTabs,
+      cloudTabs,
+      this.getSyncedIds()
+    );
+
+    localStorage.setItem(STORAGE_KEYS.TABS, JSON.stringify(merged));
+    window.dispatchEvent(new CustomEvent('tabsUpdated'));
+
+    if (toPush.length > 0) {
+      const batch = this.db.batch();
+      for (const tab of toPush) {
+        batch.set(this.tabsCollection().doc(tab.id), this.toCloudDoc(tab));
+      }
+      await batch.commit();
+    }
+
+    this.setSyncedIds(syncedIds);
+    return merged.length;
+  }
+
+  /**
+   * First sync after signing in. Quiet on success; a failure is worth a
+   * gentle warning because the user just asked to sync by signing in.
+   */
+  async initialSync() {
+    try {
+      await this.reconcile();
+    } catch (error) {
+      console.error('Initial sync failed:', error);
+      notificationManager.warning(
+        'Cloud sync is not available right now. Your tabs are safe on this device.'
+      );
+    }
+  }
+
+  /**
+   * Listen for real-time tab updates from other devices
    */
   setupTabSync() {
     if (!this.user) return;
 
-    // Listen for real-time tab updates
-    this.unsubscribe = this.db
-      .collection(FIREBASE_COLLECTIONS.USERS)
-      .doc(this.user.uid)
-      .collection(FIREBASE_COLLECTIONS.TABS)
-      .onSnapshot((snapshot) => {
-        this.handleTabsSnapshot(snapshot);
-      }, (error) => {
-        console.error('Tab sync error:', error);
-      });
+    this.unsubscribe = this.tabsCollection().onSnapshot(
+      snapshot => this.handleTabsSnapshot(snapshot),
+      error => console.error('Tab sync error:', error)
+    );
   }
 
   /**
@@ -423,72 +496,28 @@ export class FirebaseAuth {
   }
 
   /**
-   * Handle tabs snapshot from Firestore
+   * Merge a server snapshot into local storage. Never pushes from here,
+   * so snapshot handling can't loop.
    * @param {Object} snapshot - Firestore snapshot
    */
   handleTabsSnapshot(snapshot) {
-    if (!snapshot.metadata.fromCache) {
-      // Update came from server, update local storage
-      const cloudTabs = [];
-      snapshot.forEach(doc => {
-        cloudTabs.push({ id: doc.id, ...doc.data() });
-      });
-      
-      // Update local storage with cloud tabs
-      localStorage.setItem(STORAGE_KEYS.TABS, JSON.stringify(cloudTabs));
-      
-      // Refresh UI if on my-tabs page
-      if (window.location.pathname.includes('my-tabs.html')) {
-        // Dispatch event to refresh tabs display
-        window.dispatchEvent(new CustomEvent('tabsUpdated'));
-      }
-    }
-  }
+    if (snapshot.metadata.fromCache || !this.user) return;
 
-  /**
-   * Migrate local tabs to cloud
-   */
-  async migrateLocalTabs() {
-    if (!this.user) return;
+    const cloudTabs = [];
+    snapshot.forEach(doc => {
+      cloudTabs.push({ id: doc.id, ...doc.data() });
+    });
 
-    try {
-      const localTabs = LocalStorage.getAllTabs();
-      if (localTabs.length === 0) return;
+    const { merged, syncedIds } = mergeTabs(
+      LocalStorage.getAllTabs(),
+      cloudTabs,
+      this.getSyncedIds()
+    );
 
-      // Check if cloud has any tabs
-      const cloudSnapshot = await this.db
-        .collection(FIREBASE_COLLECTIONS.USERS)
-        .doc(this.user.uid)
-        .collection(FIREBASE_COLLECTIONS.TABS)
-        .get();
-
-      if (cloudSnapshot.empty) {
-        // No cloud tabs, migrate local tabs to cloud
-        const batch = this.db.batch();
-        
-        localTabs.forEach(tab => {
-          const docRef = this.db
-            .collection(FIREBASE_COLLECTIONS.USERS)
-            .doc(this.user.uid)
-            .collection(FIREBASE_COLLECTIONS.TABS)
-            .doc(tab.id);
-          
-          batch.set(docRef, {
-            name: tab.name,
-            originalTab: tab.originalTab,
-            convertedTab: tab.convertedTab,
-            settings: tab.settings || {},
-            dateCreated: tab.dateCreated,
-            dateModified: tab.dateModified || tab.dateCreated
-          });
-        });
-
-        await batch.commit();
-        notificationManager.success('Local tabs migrated to cloud!');
-      }
-    } catch (error) {
-      console.error('Migration error:', error);
-    }
+    localStorage.setItem(STORAGE_KEYS.TABS, JSON.stringify(merged));
+    // Only ids actually in the cloud count as synced here (no push occurs).
+    this.setSyncedIds(syncedIds.filter(id => cloudTabs.some(tab => tab.id === id)));
+    window.dispatchEvent(new CustomEvent('tabsUpdated'));
   }
 
   /**
@@ -502,21 +531,11 @@ export class FirebaseAuth {
     }
 
     try {
-      const docRef = this.db
-        .collection(FIREBASE_COLLECTIONS.USERS)
-        .doc(this.user.uid)
-        .collection(FIREBASE_COLLECTIONS.TABS)
-        .doc(tabData.id);
-
-      await docRef.set({
-        name: tabData.name,
-        originalTab: tabData.originalTab,
-        convertedTab: tabData.convertedTab,
-        settings: tabData.settings || {},
-        dateCreated: tabData.dateCreated,
-        dateModified: new Date().toISOString()
-      });
-
+      await this.tabsCollection().doc(tabData.id).set(this.toCloudDoc(tabData));
+      const syncedIds = this.getSyncedIds();
+      if (!syncedIds.includes(tabData.id)) {
+        this.setSyncedIds([...syncedIds, tabData.id]);
+      }
       return tabData;
     } catch (error) {
       console.error('Cloud save error:', error);
@@ -532,12 +551,8 @@ export class FirebaseAuth {
     if (!this.user) return;
 
     try {
-      await this.db
-        .collection(FIREBASE_COLLECTIONS.USERS)
-        .doc(this.user.uid)
-        .collection(FIREBASE_COLLECTIONS.TABS)
-        .doc(tabId)
-        .delete();
+      await this.tabsCollection().doc(tabId).delete();
+      this.setSyncedIds(this.getSyncedIds().filter(id => id !== tabId));
     } catch (error) {
       console.error('Cloud delete error:', error);
       throw new Error('Failed to delete from cloud');
@@ -545,7 +560,7 @@ export class FirebaseAuth {
   }
 
   /**
-   * Sync tabs manually
+   * Sync tabs manually (Sync Now button)
    */
   async syncTabs() {
     if (!this.user) {
@@ -553,38 +568,22 @@ export class FirebaseAuth {
       return;
     }
 
+    const syncBtn = document.getElementById('sync-now-btn');
     try {
-      const syncBtn = document.getElementById('sync-now-btn');
       if (syncBtn) {
         syncBtn.textContent = 'Syncing...';
         syncBtn.disabled = true;
       }
 
-      // Force refresh from cloud
-      const snapshot = await this.db
-        .collection(FIREBASE_COLLECTIONS.USERS)
-        .doc(this.user.uid)
-        .collection(FIREBASE_COLLECTIONS.TABS)
-        .get();
-
-      const cloudTabs = [];
-      snapshot.forEach(doc => {
-        cloudTabs.push({ id: doc.id, ...doc.data() });
-      });
-
-      localStorage.setItem(STORAGE_KEYS.TABS, JSON.stringify(cloudTabs));
-      
-      // Dispatch event to refresh tabs display
-      window.dispatchEvent(new CustomEvent('tabsUpdated'));
-
-      notificationManager.success('Tabs synced successfully!');
-
+      const total = await this.reconcile();
+      notificationManager.success(
+        `Tabs synced. ${total} ${total === 1 ? 'tab' : 'tabs'} total.`
+      );
     } catch (error) {
       notificationManager.error('Sync failed: ' + error.message);
     } finally {
-      const syncBtn = document.getElementById('sync-now-btn');
       if (syncBtn) {
-        syncBtn.textContent = 'Sync Now';
+        syncBtn.textContent = 'Sync now';
         syncBtn.disabled = false;
       }
     }
@@ -632,8 +631,3 @@ export class FirebaseAuth {
 
 // Export singleton instance
 export const firebaseAuth = new FirebaseAuth();
-
-// Also export to window for debugging
-if (typeof window !== 'undefined') {
-  window.debugFirebaseAuth = firebaseAuth;
-}
