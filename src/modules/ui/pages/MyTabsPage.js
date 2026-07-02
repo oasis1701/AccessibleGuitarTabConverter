@@ -83,6 +83,7 @@ export class MyTabsPage {
    * Show no tabs message
    */
   showNoTabsMessage() {
+    if (this.tabsTbody) this.tabsTbody.innerHTML = '';
     if (this.noTabsMessage) this.noTabsMessage.style.display = 'block';
     if (this.tabsContainer) this.tabsContainer.style.display = 'none';
     if (this.clearAllBtn) this.clearAllBtn.style.display = 'none';

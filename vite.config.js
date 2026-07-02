@@ -2,8 +2,10 @@ import { defineConfig } from 'vite';
 import legacy from '@vitejs/plugin-legacy';
 import { resolve } from 'path';
 
-export default defineConfig(({ command }) => {
-  const base = command === 'build' ? '/AccessibleGuitarTabConverter/' : '/';
+export default defineConfig(({ command, isPreview }) => {
+  // GitHub Pages serves the site under the repo name; dev stays at root.
+  const base =
+    command === 'build' || isPreview ? '/AccessibleGuitarTabConverter/' : '/';
   
   return {
     base,
