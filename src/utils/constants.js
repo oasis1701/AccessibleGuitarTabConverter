@@ -4,43 +4,20 @@
  */
 
 /**
- * Guitar string names from high to low
- * @type {string[]}
+ * Default string names per string count, listed high (index 0) to low.
+ * Used for unlabeled tabs where names must be inferred from line position.
+ * @type {Object<number, string[]>}
  */
-export const STRING_NAMES = ['E', 'B', 'G', 'D', 'A', 'E'];
+export const TUNING_TEMPLATES = {
+  4: ['G', 'D', 'A', 'low E'],
+  5: ['G', 'D', 'A', 'low E', 'low B'],
+  6: ['high E', 'B', 'G', 'D', 'A', 'low E'],
+  7: ['high E', 'B', 'G', 'D', 'A', 'low E', 'low B'],
+  8: ['high E', 'B', 'G', 'D', 'A', 'low E', 'low B', 'F#']
+};
 
 /**
- * 7-string guitar string names from high to low
- * @type {string[]}
- */
-export const STRING_NAMES_7 = ['E', 'B', 'G', 'D', 'A', 'E', 'B'];
-
-/**
- * 8-string guitar string names from high to low
- * @type {string[]}
- */
-export const STRING_NAMES_8 = ['E', 'B', 'G', 'D', 'A', 'E', 'B', 'F#'];
-
-/**
- * Guitar string numbers with ordinal suffixes
- * @type {string[]}
- */
-export const STRING_NUMBERS = ['1st', '2nd', '3rd', '4th', '5th', '6th'];
-
-/**
- * 7-string guitar string numbers with ordinal suffixes
- * @type {string[]}
- */
-export const STRING_NUMBERS_7 = ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th'];
-
-/**
- * 8-string guitar string numbers with ordinal suffixes
- * @type {string[]}
- */
-export const STRING_NUMBERS_8 = ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th'];
-
-/**
- * Mapping of technique symbols to their descriptions
+ * Mapping of technique symbols to their display names
  * @type {Object<string, string>}
  */
 export const TECHNIQUES = {
@@ -55,7 +32,9 @@ export const TECHNIQUES = {
   't': 'tap',
   'x': 'mute',
   '^': 'bend',
-  'v': 'whammy down and up'
+  'v': 'vibrato',
+  '.': 'staccato',
+  '>': 'accent'
 };
 
 /**
@@ -92,11 +71,14 @@ export const TAB_FORMATS = {
  * @type {Object<string, RegExp>}
  */
 export const PATTERNS = {
-  CHORD_LINE: /^([A-G][#b]?[\w\*]*)[\s]*:[\s]*([\dX\-]+)$/i,
-  TAB_LINE: /[E|A|D|G|B|e][\s]*[:|\|].*[-|\d]/,
-  STANDARD_TAB_LINE: /^\|[-\d\/\\~\^vhp\s|]+\|?$/,
-  TECHNIQUE_LINE: /^[~\/\\\^vhp]\s+/,
-  LEGEND_LINE: /^\|\s*[a-zA-Z]\s+(Bend|Hammer|Pull|Slide|Vibrato|Trill|Release)/i
+  // Chord definition like "F: 1-3-3-2-1-1" or "Am: X-0-2-2-1-0" —
+  // 6 to 8 dash-separated tokens of 1-2 digits or X, nothing else.
+  CHORD_LINE: /^([A-G][#b]?[\w*]*)\s*:\s*((?:\d{1,2}|[xX])(?:-(?:\d{1,2}|[xX])){5,7})\s*$/,
+  // String label at the start of a tab line: any-case note letter with an
+  // optional accidental, then ':' or '|' (at most two spaces in between).
+  STRING_LABEL: /^\s*([A-Ga-g][#b]?)\s{0,2}([:|]{1,2})/,
+  TECHNIQUE_LINE: /^[~/\\^vhp]\s+/,
+  LEGEND_LINE: /^\|?\s*[a-zA-Z]\s+(Bend|Hammer|Pull|Slide|Vibrato|Trill|Release|Tap|Harmonic)/i
 };
 
 /**
@@ -143,3 +125,9 @@ export const ANIMATION_DURATIONS = {
   BUTTON_FEEDBACK: 2000,
   TRANSITION: 200
 };
+
+/**
+ * Highest fret number accepted as a real note
+ * @type {number}
+ */
+export const MAX_FRET = 24;

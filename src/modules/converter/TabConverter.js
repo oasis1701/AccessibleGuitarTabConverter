@@ -3,10 +3,8 @@
  * @module converter/TabConverter
  */
 
-import { STRING_NAMES, STRING_NAMES_7, STRING_NAMES_8, STRING_NUMBERS, STRING_NUMBERS_7, STRING_NUMBERS_8, DEFAULT_SETTINGS } from '../../utils/constants.js';
 import { ChordParser } from './parsers/ChordParser.js';
 import { StandardTabParser } from './parsers/StandardTabParser.js';
-import { TechniqueParser } from './parsers/TechniqueParser.js';
 import { OutputFormatter } from './formatters/OutputFormatter.js';
 import { detectTabFormat, validateSettings } from '../../utils/validators.js';
 import { TAB_FORMATS } from '../../utils/constants.js';
@@ -19,13 +17,8 @@ export class TabConverter {
    * Create a TabConverter instance
    */
   constructor() {
-    this.stringNames = STRING_NAMES;
-    this.stringNumbers = STRING_NUMBERS;
-    
-    // Initialize parsers
     this.chordParser = new ChordParser();
     this.standardTabParser = new StandardTabParser();
-    this.techniqueParser = new TechniqueParser();
     this.outputFormatter = new OutputFormatter();
   }
 
@@ -34,35 +27,35 @@ export class TabConverter {
    * @param {string} tabText - Raw tab text
    * @param {Object} settings - Conversion settings
    * @returns {string} Converted accessible format
-   * @throws {Error} If conversion fails
+   * @throws {Error} If conversion fails; error messages are plain sentences
+   *   meant to be shown to the user directly
    */
   convert(tabText, settings = {}) {
-    if (!tabText || typeof tabText !== 'string') {
-      throw new Error('Please enter a guitar tab to convert.');
+    if (!tabText || typeof tabText !== 'string' || !tabText.trim()) {
+      throw new Error('Please paste a guitar tab to convert.');
     }
+
+    // Normalize line endings, tabs and unicode dashes once, up front.
+    const normalized = tabText
+      .replace(/\r\n?/g, '\n')
+      .replace(/\t/g, '    ')
+      .replace(/[–—]/g, '-');
 
     const validatedSettings = validateSettings(settings);
-    const tabFormat = detectTabFormat(tabText);
+    const tabFormat = detectTabFormat(normalized);
 
     if (!tabFormat) {
-      throw new Error('No valid tab format detected. Please check that your tab is in the correct format.');
+      throw new Error(
+        "This text doesn't look like a guitar tab. Paste the plain-text " +
+          'version of a tab, with string lines made of dashes and fret ' +
+          'numbers, like e|--3--5--|.'
+      );
     }
 
-    try {
-      switch (tabFormat) {
-        case TAB_FORMATS.CHORD_CHART:
-          return this.convertChordChart(tabText, validatedSettings);
-        
-        case TAB_FORMATS.STANDARD_TAB:
-        case TAB_FORMATS.LABELED_TAB:
-          return this.convertTablature(tabText, validatedSettings, tabFormat);
-        
-        default:
-          throw new Error('Unsupported tab format');
-      }
-    } catch (error) {
-      throw new Error(`Error converting tab: ${error.message}`);
+    if (tabFormat === TAB_FORMATS.CHORD_CHART) {
+      return this.convertChordChart(normalized, validatedSettings);
     }
+    return this.convertTablature(normalized, validatedSettings);
   }
 
   /**
@@ -75,11 +68,11 @@ export class TabConverter {
   convertChordChart(tabText, settings) {
     const lines = tabText.split('\n').filter(line => line.trim());
     const chords = this.chordParser.parseChordChart(lines);
-    
+
     if (chords.length === 0) {
       throw new Error('No valid chords found in chord chart.');
     }
-    
+
     return this.outputFormatter.formatChordChart(chords, settings);
   }
 
@@ -87,27 +80,20 @@ export class TabConverter {
    * Convert tablature format
    * @param {string} tabText - Tab text
    * @param {Object} settings - Conversion settings
-   * @param {string} tabFormat - Tab format type
    * @returns {string} Converted tablature
    * @private
    */
-  convertTablature(tabText, settings, tabFormat) {
-    const lines = tabText.split('\n').filter(line => line.trim());
-    
-    // Parse the tab based on format
-    const parser = tabFormat === TAB_FORMATS.STANDARD_TAB ? 
-      this.standardTabParser : this.standardTabParser; // Use same parser for now
-    
-    const tabData = parser.parse(lines);
-    
+  convertTablature(tabText, settings) {
+    // Keep blank lines: they separate tab sections.
+    const lines = tabText.split('\n');
+    const tabData = this.standardTabParser.parse(lines);
+
     if (tabData.sequences.length === 0) {
-      throw new Error('No notes found in the tab. Please make sure your tab is properly formatted.');
+      throw new Error(
+        'No notes found in the tab. Check that the string lines contain fret numbers.'
+      );
     }
-    
-    // Apply technique analysis
-    tabData.sequences = this.techniqueParser.enhanceWithTechniques(tabData.sequences);
-    
-    // Format the output
+
     return this.outputFormatter.formatTablature(tabData, settings);
   }
 
@@ -118,13 +104,13 @@ export class TabConverter {
    */
   static getSettingsFromElements(settingsElements) {
     const settings = {};
-    
+
     for (const [key, element] of Object.entries(settingsElements)) {
       if (element && element.type === 'checkbox') {
         settings[key] = element.checked;
       }
     }
-    
+
     return settings;
   }
 

@@ -1,10 +1,51 @@
 /**
- * @fileoverview Parser for standard tablature format
+ * @fileoverview Parser for standard and labeled tablature formats.
+ *
+ * Parsing runs as a staged pipeline:
+ *   classify lines → group sections → assign string names →
+ *   align bodies → tokenize each string → bind techniques →
+ *   build column events with measure numbers.
+ *
+ * Columns are indexed into the musical body (after the string label is
+ * stripped), so labels of different widths cannot desynchronize chords.
+ * Digit runs are consumed once, so multi-digit frets like 12 can never
+ * be re-read as a second note.
+ *
  * @module converter/parsers/StandardTabParser
  */
 
-import { STRING_NAMES, STRING_NAMES_7, STRING_NAMES_8, PATTERNS } from '../../../utils/constants.js';
-import { isTabLine, isStandardTabLine, isTechniqueLine } from '../../../utils/validators.js';
+import { TUNING_TEMPLATES, MAX_FRET } from '../../../utils/constants.js';
+import {
+  splitStringLabel,
+  isMusicContent,
+  isTechniqueLine
+} from '../../../utils/validators.js';
+import { getOrdinalSuffix } from '../../../utils/helpers.js';
+
+/** Technique symbols recognized inside a string body (x is a mute, not a technique). */
+const TECH_SYMBOLS = new Set(['h', 'p', 'b', 'r', 's', '/', '\\', '~', 't', '^', 'v', '.', '>']);
+
+/** Display names for technique detail types. */
+const TECH_NAMES = {
+  'hammer-on': 'hammer-on',
+  'pull-off': 'pull-off',
+  bend: 'bend',
+  release: 'release',
+  'slide-up': 'slide up',
+  'slide-down': 'slide down',
+  slide: 'slide',
+  vibrato: 'vibrato',
+  tap: 'tap',
+  staccato: 'staccato',
+  accent: 'accent',
+  'ghost note': 'ghost note',
+  harmonic: 'harmonic'
+};
+
+/** Describe a fret as spoken text ("open string" / "5th fret"). */
+function fretWord(fret) {
+  return fret === 0 ? 'open string' : `${fret}${getOrdinalSuffix(fret)} fret`;
+}
 
 /**
  * Class to parse standard and labeled tablature formats
@@ -12,542 +53,626 @@ import { isTabLine, isStandardTabLine, isTechniqueLine } from '../../../utils/va
 export class StandardTabParser {
   /**
    * Parse tablature lines into structured data
-   * @param {string[]} lines - All lines from the tab
-   * @returns {Object} Parsed tab data with sequences and annotations
-   * @throws {Error} If parsing fails
+   * @param {string[]} lines - All lines from the tab, blanks included
+   * @returns {{sequences: Array<Object>, annotations: Array<Object>}} Parsed tab
+   * @throws {Error} When no tab lines can be found
    */
   parse(lines) {
-    try {
-      if (!lines || !Array.isArray(lines)) {
-        throw new Error('Invalid input: expected array of lines');
-      }
+    if (!Array.isArray(lines)) {
+      throw new Error('Nothing to convert yet. Paste a guitar tab first.');
+    }
 
-      const tabLineGroups = this.identifyTabLines(lines);
-      
-      if (tabLineGroups.length === 0) {
-        throw new Error('No valid tab sections found. Please check your tab format.');
-      }
+    const classified = this.classifyLines(lines);
+    const groups = this.groupSections(classified);
 
-      const annotations = this.extractAnnotations(lines);
-      const sequences = this.parseNoteSequences(tabLineGroups, annotations);
-      
-      return {
-        sequences,
-        annotations,
-        tabLineGroups
-      };
-    } catch (error) {
-      console.error('Parsing error:', error);
-      throw new Error(`Failed to parse tab: ${error.message}`);
+    if (groups.length === 0) {
+      throw new Error(
+        'No guitar tab lines found. A tab needs at least two string lines ' +
+          'made of dashes and fret numbers, like e|--3--5--|.'
+      );
     }
-  }
 
-  /**
-   * Identify and group tab lines
-   * @param {string[]} lines - All lines from the tab
-   * @returns {Array<Array<Object>>} Groups of tab lines
-   * @private
-   */
-  identifyTabLines(lines) {
-    const tabLineGroups = [];
-    
-    // First check if this is a standard 6-line tab format (no string labels)
-    const standardTabGroup = this.identifyStandardTabFormat(lines);
-    if (standardTabGroup.length > 0) {
-      return standardTabGroup;
-    }
-    
-    // Fall back to labeled tab format with context tracking
-    let currentGroup = [];
-    let currentContext = [];
-    
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      
-      if (isTabLine(line)) {
-        const stringInfo = this.identifyString(line, currentContext);
-        if (stringInfo) {
-          currentGroup.push({
-            content: line,
-            stringIndex: stringInfo.index,
-            stringName: stringInfo.name,
-            lineNumber: i
-          });
-          currentContext.push(stringInfo.name);
-        }
-      } else if (currentGroup.length > 0) {
-        // End of current tab group
-        if (currentGroup.length >= 3) { // At least 3 strings for valid tab
-          tabLineGroups.push(currentGroup);
-        }
-        currentGroup = [];
-        currentContext = [];
-      }
-    }
-    
-    // Don't forget the last group
-    if (currentGroup.length >= 3) {
-      tabLineGroups.push(currentGroup);
-    }
-    
-    return tabLineGroups;
-  }
+    const sequences = groups
+      .map((group, index) => this.parseGroup(group, index + 1))
+      .filter(sequence => sequence.notes.length > 0);
 
-  /**
-   * Identify standard tab format (no string labels)
-   * @param {string[]} lines - All lines from the tab
-   * @returns {Array<Array<Object>>} Groups of standard tab lines
-   * @private
-   */
-  identifyStandardTabFormat(lines) {
-    const tabGroups = [];
-    let currentGroup = [];
-    
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      
-      // Skip empty lines and technique legends
-      if (!line || isTechniqueLine(line)) {
-        continue;
-      }
-      
-      // Check if this looks like a standard tab line
-      if (isStandardTabLine(line)) {
-        currentGroup.push({
-          content: line,
-          stringIndex: currentGroup.length, // Position determines string
-          stringName: null, // Will be set after detecting string count
-          lineNumber: i
-        });
-        
-        // Check if we have a complete group (6, 7, or 8 strings)
-        if (currentGroup.length >= 6) {
-          // Look ahead to see if there are more strings
-          let nextLineIndex = i + 1;
-          let hasMoreStrings = false;
-          
-          while (nextLineIndex < lines.length && currentGroup.length < 8) {
-            const nextLine = lines[nextLineIndex].trim();
-            if (isStandardTabLine(nextLine)) {
-              currentGroup.push({
-                content: nextLine,
-                stringIndex: currentGroup.length,
-                stringName: null,
-                lineNumber: nextLineIndex
-              });
-              i = nextLineIndex; // Skip this line in the main loop
-              hasMoreStrings = true;
-            } else if (!nextLine || isTechniqueLine(nextLine)) {
-              nextLineIndex++;
-              continue;
-            } else {
-              break;
-            }
-            nextLineIndex++;
-          }
-          
-          // Determine string names based on count
-          const stringCount = currentGroup.length;
-          const stringNames = this.getStringNamesForCount(stringCount);
-          
-          // Update string names
-          currentGroup.forEach((line, index) => {
-            line.stringName = stringNames[index];
-          });
-          
-          tabGroups.push([...currentGroup]);
-          currentGroup = [];
-        }
-      } else if (currentGroup.length > 0) {
-        // End current group if we have at least 3 strings
-        if (currentGroup.length >= 3) {
-          // Set string names for incomplete groups
-          const stringNames = this.getStringNamesForCount(currentGroup.length);
-          currentGroup.forEach((line, index) => {
-            line.stringName = stringNames[index];
-          });
-          tabGroups.push([...currentGroup]);
-        }
-        currentGroup = [];
-      }
-    }
-    
-    // Don't forget the last group
-    if (currentGroup.length >= 3) {
-      const stringNames = this.getStringNamesForCount(currentGroup.length);
-      currentGroup.forEach((line, index) => {
-        line.stringName = stringNames[index];
-      });
-      tabGroups.push(currentGroup);
-    }
-    
-    return tabGroups;
-  }
-
-  /**
-   * Get string names array based on string count
-   * @param {number} count - Number of strings
-   * @returns {string[]} Array of string names
-   * @private
-   */
-  getStringNamesForCount(count) {
-    switch (count) {
-      case 7:
-        return STRING_NAMES_7;
-      case 8:
-        return STRING_NAMES_8;
-      case 6:
-        return STRING_NAMES;
-      default:
-        // For non-standard counts, use generic names
-        const names = [];
-        for (let i = 0; i < count; i++) {
-          if (i < 6) {
-            names.push(STRING_NAMES[i]);
-          } else if (i === 6) {
-            names.push('B'); // 7th string
-          } else if (i === 7) {
-            names.push('F#'); // 8th string
-          } else {
-            names.push(`String ${i + 1}`);
-          }
-        }
-        return names;
-    }
-  }
-
-  /**
-   * Identify string from a labeled tab line with context awareness
-   * @param {string} line - Tab line with string label
-   * @param {Array} context - Previously identified strings for context
-   * @returns {Object|null} String info with index and name
-   * @private
-   */
-  identifyString(line, context = []) {
-    const trimmed = line.trim();
-    
-    // Extract the string label
-    const labelMatch = trimmed.match(/^([A-Ga-g]#?)\s*[:!|]/);
-    if (!labelMatch) return null;
-    
-    const label = labelMatch[1];
-    const normalizedLabel = label.charAt(0).toUpperCase() + label.slice(1);
-    
-    // Use context to determine string position
-    if (normalizedLabel === 'E' || normalizedLabel === 'e') {
-      // Check context to determine if high E or low E
-      if (context.length === 0) {
-        // First string is likely high E
-        return { index: 0, name: 'high E' };
-      } else if (context.length >= 5) {
-        // After 5 strings, it's low E
-        return { index: 5, name: 'low E' };
-      } else {
-        // In between, default to high E
-        return { index: 0, name: 'high E' };
-      }
-    } else if (normalizedLabel === 'B') {
-      // Check if this is regular B or low B (7-string)
-      if (context.includes('low E') || context.length >= 6) {
-        return { index: 6, name: 'low B' };
-      } else {
-        return { index: 1, name: 'B' };
-      }
-    } else {
-      // Standard mappings for other strings
-      const standardMap = {
-        'G': { index: 2, name: 'G' },
-        'D': { index: 3, name: 'D' },
-        'A': { index: 4, name: 'A' },
-        'F#': { index: 7, name: 'F#' },
-        'F': { index: 7, name: 'F#' }
-      };
-      
-      return standardMap[normalizedLabel] || null;
-    }
-  }
-
-  /**
-   * Extract annotations from non-tab lines
-   * @param {string[]} lines - All lines from the tab
-   * @returns {Array<Object>} Extracted annotations
-   * @private
-   */
-  extractAnnotations(lines) {
-    const annotations = [];
-    
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      
-      // Look for text that appears between tab sections
-      if (!isTabLine(line) && !isStandardTabLine(line) && !isTechniqueLine(line) && line.trim().length > 0) {
-        const trimmed = line.trim();
-        const position = line.indexOf(trimmed);
-        
-        // Categorize the annotation
-        let category = 'note';
-        if (/^[IVX]+\s*-/.test(trimmed)) {
-          category = 'section';
-        } else if (trimmed.startsWith('"') || trimmed.includes('"')) {
-          category = 'lyrics';
-        } else if (/\d+:\d+/.test(trimmed)) {
-          category = 'timing';
-        } else if (/repeat|times|x\d+/i.test(trimmed)) {
-          category = 'instruction';
-        } else if (/^[A-G][#b]?[\w]*\s+[A-G][#b]?/.test(trimmed)) {
-          category = 'chords';
-        }
-        
-        annotations.push({ 
-          text: trimmed, 
-          position: position,
-          lineNumber: i,
-          category: category
-        });
-      }
-    }
-    
-    return annotations;
-  }
-
-  /**
-   * Parse note sequences from tab line groups
-   * @param {Array<Array<Object>>} tabLineGroups - Groups of tab lines
-   * @param {Array<Object>} annotations - Annotations
-   * @returns {Array<Object>} Parsed note sequences
-   * @private
-   */
-  parseNoteSequences(tabLineGroups, annotations) {
-    const allSequences = [];
-    
-    for (let groupIndex = 0; groupIndex < tabLineGroups.length; groupIndex++) {
-      const group = tabLineGroups[groupIndex];
-      const sequence = this.parseTabGroup(group, annotations, groupIndex + 1);
-      if (sequence.notes.length > 0) {
-        allSequences.push(sequence);
-      }
-    }
-    
-    return allSequences;
-  }
-
-  /**
-   * Parse a single group of tab lines
-   * @param {Array<Object>} tabGroup - Group of tab lines
-   * @param {Array<Object>} annotations - Annotations
-   * @param {number} sectionNumber - Section number
-   * @returns {Object} Parsed sequence
-   * @private
-   */
-  parseTabGroup(tabGroup, annotations, sectionNumber) {
-    // Sort strings by index (high E to low E)
-    tabGroup.sort((a, b) => a.stringIndex - b.stringIndex);
-    
-    const notes = [];
-    const maxLength = Math.max(...tabGroup.map(line => line.content.length));
-    
-    // Parse position by position
-    for (let pos = 0; pos < maxLength; pos++) {
-      const notesAtPosition = [];
-      
-      for (const stringLine of tabGroup) {
-        const note = this.parseNoteAtPosition(stringLine, pos);
-        if (note) {
-          notesAtPosition.push(note);
-        }
-      }
-      
-      if (notesAtPosition.length > 0) {
-        // Check for annotations at this position
-        const annotation = this.findAnnotationAtPosition(annotations, pos, tabGroup[0].lineNumber);
-        
-        notes.push({
-          position: pos,
-          annotation: annotation,
-          notes: notesAtPosition,
-          isChord: notesAtPosition.length > 1
-        });
-      }
-    }
-    
     return {
-      section: sectionNumber,
-      notes: notes
+      sequences,
+      annotations: this.collectAnnotations(classified)
     };
   }
 
   /**
-   * Parse note at a specific position
-   * @param {Object} stringLine - String line data
-   * @param {number} position - Position in the line
-   * @returns {Object|null} Parsed note or null
+   * Classify each raw line as string music, annotation, legend or blank.
+   * @param {string[]} lines - Raw input lines
+   * @returns {Array<Object>} Classified lines
    * @private
    */
-  parseNoteAtPosition(stringLine, position) {
-    const content = stringLine.content;
-    if (position >= content.length) return null;
-    
-    const char = content[position];
-    
-    // Skip non-note characters
-    if (char === '-' || char === '|' || char === ' ' || char === ':') {
-      return null;
-    }
-    
-    // Parse fret number (could be multi-digit)
-    let fretNum = '';
-    let currentPos = position;
-    
-    while (currentPos < content.length && /\d/.test(content[currentPos])) {
-      fretNum += content[currentPos];
-      currentPos++;
-    }
-    
-    if (fretNum === '') {
-      // Check for special characters
-      if (char === 'x' || char === 'X') {
+  classifyLines(lines) {
+    return lines.map((raw, lineNumber) => {
+      const line = raw.replace(/\r$/, '').replace(/\s+$/, '');
+      const text = line.trim();
+
+      if (!text) {
+        return { type: 'blank', lineNumber };
+      }
+
+      if (isTechniqueLine(text)) {
+        return { type: 'legend', text, lineNumber };
+      }
+
+      const labeled = splitStringLabel(line);
+      if (labeled && isMusicContent(labeled.body)) {
         return {
-          string: stringLine.stringName,
-          stringIndex: stringLine.stringIndex,
-          fret: 'mute',
-          techniques: this.findTechniques(content, position, 1),
-          position: position
-        };
-      } else if (char === 'o' || char === 'O') {
-        // Open string notation
-        return {
-          string: stringLine.stringName,
-          stringIndex: stringLine.stringIndex,
-          fret: 0,
-          techniques: this.findTechniques(content, position, 1),
-          position: position
+          type: 'string',
+          label: labeled.label,
+          body: labeled.body,
+          lineNumber
         };
       }
-      return null;
-    }
-    
-    // Validate fret number
-    const fret = parseInt(fretNum);
-    if (isNaN(fret) || fret < 0 || fret > 24) {
-      console.warn(`Invalid fret number: ${fretNum} at position ${position}`);
-      return null;
-    }
-    
-    // Look for techniques around this note
-    const techniques = this.findTechniques(content, position, currentPos - position);
-    
-    return {
-      string: stringLine.stringName,
-      stringIndex: stringLine.stringIndex,
-      fret: fret,
-      techniques: techniques,
-      position: position
-    };
+
+      if (isMusicContent(text)) {
+        return { type: 'string', label: null, body: text, lineNumber };
+      }
+
+      return { type: 'annotation', text, lineNumber };
+    });
   }
 
   /**
-   * Find techniques around a note with expanded search
-   * @param {string} content - Line content
-   * @param {number} notePosition - Position of the note
-   * @param {number} noteLength - Length of the fret number
-   * @returns {Array<string>} Found techniques
+   * Group consecutive string lines into sections. A blank, annotation or
+   * legend line always terminates the current group, so separate tab blocks
+   * can never merge into one oversized "instrument".
+   * @param {Array<Object>} classified - Classified lines
+   * @returns {Array<Object>} Section groups with rows and optional heading
    * @private
    */
-  findTechniques(content, notePosition, noteLength = 1) {
-    const techniques = [];
-    const techniqueMap = {
-      'h': 'hammer-on',
-      'p': 'pull-off',
-      'b': 'bend',
-      'r': 'release',
-      's': 'slide',
-      '/': 'slide up',
-      '\\': 'slide down',
-      '~': 'vibrato',
-      't': 'tap',
-      '^': 'bend',
-      'v': 'vibrato',
-      'x': 'mute',
-      '.': 'staccato',
-      '>': 'accent'
+  groupSections(classified) {
+    const groups = [];
+    let rows = [];
+    let firstIndex = -1;
+
+    const closeGroup = () => {
+      const labeledCount = rows.filter(row => row.label).length;
+      if (labeledCount >= 2 || rows.length >= 3) {
+        groups.push({
+          rows,
+          heading: this.findHeading(classified, firstIndex)
+        });
+      }
+      rows = [];
+      firstIndex = -1;
     };
-    
-    // Expanded search radius
-    const searchRadius = 3;
-    const start = Math.max(0, notePosition - searchRadius);
-    const end = Math.min(content.length, notePosition + noteLength + searchRadius);
-    
-    // Check before the note
-    for (let i = notePosition - 1; i >= start; i--) {
-      const char = content[i];
-      if (techniqueMap[char] && !techniques.includes(techniqueMap[char])) {
-        techniques.push(techniqueMap[char]);
+
+    classified.forEach((entry, index) => {
+      if (entry.type === 'string') {
+        if (rows.length === 0) firstIndex = index;
+        rows.push(entry);
+      } else if (rows.length > 0) {
+        closeGroup();
       }
-      
-      // Check for multi-character techniques
-      if (i > 0 && content.substring(i - 1, i + 1) === 'PM') {
-        if (!techniques.includes('palm mute')) {
-          techniques.push('palm mute');
-        }
-      }
-    }
-    
-    // Check after the note
-    for (let i = notePosition + noteLength; i < end; i++) {
-      const char = content[i];
-      if (techniqueMap[char] && !techniques.includes(techniqueMap[char])) {
-        techniques.push(techniqueMap[char]);
-      }
-    }
-    
-    // Check for parentheses (ghost notes)
-    if (notePosition > 0 && notePosition + noteLength < content.length) {
-      if (content[notePosition - 1] === '(' && content[notePosition + noteLength] === ')') {
-        techniques.push('ghost note');
-      }
-    }
-    
-    // Check for harmonics notation <12>
-    if (notePosition > 0 && notePosition + noteLength < content.length) {
-      if (content[notePosition - 1] === '<' && content[notePosition + noteLength] === '>') {
-        techniques.push('harmonic');
-      }
-    }
-    
-    return techniques;
+    });
+    if (rows.length > 0) closeGroup();
+
+    return groups;
   }
 
   /**
-   * Find annotation at a specific position
-   * @param {Array<Object>} annotations - All annotations
-   * @param {number} position - Position to check
-   * @param {number} lineNumber - Line number to check
-   * @returns {string|null} Annotation text or null
+   * Find a short annotation just above a group to use as its heading
+   * (e.g. "[Intro]" or "Verse 1").
+   * @param {Array<Object>} classified - Classified lines
+   * @param {number} firstIndex - Index of the group's first string line
+   * @returns {string|null} Heading text without brackets
    * @private
    */
-  findAnnotationAtPosition(annotations, position, lineNumber) {
-    for (const annotation of annotations) {
-      // Check if annotation is near this position and line
-      if (Math.abs(annotation.position - position) <= 10 && 
-          Math.abs(annotation.lineNumber - lineNumber) <= 2) {
-        return annotation.text;
+  findHeading(classified, firstIndex) {
+    for (let k = firstIndex - 1; k >= 0 && k >= firstIndex - 2; k--) {
+      const entry = classified[k];
+      if (entry.type === 'blank') continue;
+      if (
+        entry.type === 'annotation' &&
+        entry.text.length <= 40 &&
+        !this.isChordNameLine(entry.text)
+      ) {
+        return entry.text.replace(/^\[/, '').replace(/\]$/, '').trim();
       }
+      break;
     }
     return null;
   }
 
   /**
-   * Detect measures/bars in tab lines
-   * @param {string} line - Tab line
-   * @returns {Array<number>} Positions of measure markers
+   * Check whether text is a line of chord names ("C  G  Am  F").
+   * @param {string} text - Annotation text
+   * @returns {boolean} True for chord-name lines
+   * @private
    */
-  detectMeasures(line) {
-    const measures = [];
-    for (let i = 0; i < line.length; i++) {
-      if (line[i] === '|') {
-        measures.push(i);
+  isChordNameLine(text) {
+    return /^[A-G][#b]?[\w*]*(\s+[A-G][#b]?[\w*]*)+$/.test(text);
+  }
+
+  /**
+   * Parse one section group into a note sequence.
+   * @param {Object} group - Section group with rows
+   * @param {number} sectionNumber - 1-based section number
+   * @returns {Object} Sequence with column events and measure info
+   * @private
+   */
+  parseGroup(group, sectionNumber) {
+    const strings = this.assignStrings(group.rows);
+    this.alignBodies(strings);
+
+    const allNotes = [];
+    const barCounts = new Map();
+
+    for (const string of strings) {
+      const tokens = this.tokenize(string.content);
+      for (const token of tokens) {
+        if (token.kind === 'bar') {
+          barCounts.set(token.col, (barCounts.get(token.col) || 0) + 1);
+        }
+      }
+      allNotes.push(...this.buildNotes(tokens, string));
+    }
+
+    // A column is a measure boundary when at least half the strings have a
+    // bar line there (tolerates a missing | on sloppy lines).
+    const threshold = Math.ceil(strings.length / 2);
+    const barColumns = [...barCounts.entries()]
+      .filter(([, count]) => count >= threshold)
+      .map(([col]) => col)
+      .sort((a, b) => a - b);
+
+    // Group simultaneous notes (same start column) into events.
+    const byPosition = new Map();
+    for (const note of allNotes) {
+      if (!byPosition.has(note.position)) byPosition.set(note.position, []);
+      byPosition.get(note.position).push(note);
+    }
+
+    const events = [...byPosition.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([position, notes]) => ({
+        position,
+        measure: 1,
+        isChord: notes.length > 1,
+        notes: notes.sort((a, b) => a.stringIndex - b.stringIndex)
+      }));
+
+    let measureCount = 0;
+    if (events.length > 0 && barColumns.length > 0) {
+      const first = events[0].position;
+      const last = events[events.length - 1].position;
+      const interior = barColumns.filter(col => col > first && col <= last);
+      for (const event of events) {
+        event.measure = 1 + interior.filter(col => col <= event.position).length;
+      }
+      measureCount = interior.length + 1;
+    }
+
+    return {
+      section: sectionNumber,
+      heading: group.heading,
+      measureCount,
+      stringCount: strings.length,
+      notes: events
+    };
+  }
+
+  /**
+   * Assign a display name and index to every row of a group.
+   * Position in the block decides the index; the label only names the
+   * string, so duplicate letters (drop tunings) and unknown letters
+   * (alternate tunings) are all kept.
+   * @param {Array<Object>} rows - Group rows, top line first
+   * @returns {Array<Object>} Strings with name, index and content
+   * @private
+   */
+  assignStrings(rows) {
+    let ordered = rows;
+    if (this.isInverted(rows)) {
+      ordered = [...rows].reverse();
+    }
+
+    const letters = ordered.map(row =>
+      row.label ? this.normalizeLetter(row.label) : null
+    );
+    const counts = {};
+    for (const letter of letters) {
+      if (letter) counts[letter] = (counts[letter] || 0) + 1;
+    }
+
+    const allBare = ordered.every(row => !row.label);
+    const template = allBare
+      ? TUNING_TEMPLATES[ordered.length] || null
+      : null;
+
+    return ordered.map((row, index) => ({
+      name: this.stringName(row, index, ordered.length, letters, counts, template),
+      index,
+      content: row.body,
+      lineNumber: row.lineNumber
+    }));
+  }
+
+  /**
+   * Compute the display name for one string row.
+   * @private
+   */
+  stringName(row, index, total, letters, counts, template) {
+    if (!row.label) {
+      if (template) return template[index];
+      return `String ${index + 1}`;
+    }
+
+    const letter = letters[index];
+    if (counts[letter] > 1) {
+      if (letters.lastIndexOf(letter) === index) return `low ${letter}`;
+      if (letters.indexOf(letter) === index && letter === 'E') return 'high E';
+      return letter;
+    }
+
+    if (letter === 'E') {
+      if (index === 0) return 'high E';
+      if (index === total - 1) return 'low E';
+    }
+    return letter;
+  }
+
+  /**
+   * Uppercase a label letter, keeping its accidental ("f#" → "F#").
+   * @private
+   */
+  normalizeLetter(label) {
+    return label.charAt(0).toUpperCase() + label.slice(1);
+  }
+
+  /**
+   * Detect tabs written low string first (e.g. E A D G B e) so they can be
+   * flipped into the conventional high-first order.
+   * @param {Array<Object>} rows - Group rows
+   * @returns {boolean} True when the block is inverted
+   * @private
+   */
+  isInverted(rows) {
+    if (rows.some(row => !row.label)) return false;
+
+    const labels = rows.map(row => row.label);
+    const first = labels[0];
+    const last = labels[labels.length - 1];
+
+    // A lone lowercase "e" is the high E string; if it sits on the bottom
+    // line the tab is written low-to-high.
+    if (last === 'e' && first !== 'e') return true;
+
+    // All-uppercase standard tuning written low-to-high.
+    const letters = labels.map(label => this.normalizeLetter(label));
+    if (letters.length === 6 && letters.join(' ') === 'E A D G B E' &&
+        rows.every(row => row.label === row.label.toUpperCase())) {
+      // High-to-low standard is E B G D A E; low-to-high is E A D G B E.
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Align string bodies onto a shared column grid. Labels were already
+   * stripped, so the main job is removing a shared leading bar line and
+   * padding to equal length.
+   * @param {Array<Object>} strings - Strings with content
+   * @private
+   */
+  alignBodies(strings) {
+    const allStartWithBar = strings.every(string => {
+      const barIndex = string.content.indexOf('|');
+      return barIndex >= 0 && barIndex <= 4;
+    });
+
+    if (allStartWithBar) {
+      for (const string of strings) {
+        string.content = string.content.slice(string.content.indexOf('|') + 1);
       }
     }
-    return measures;
+
+    const maxLength = strings.reduce(
+      (max, string) => Math.max(max, string.content.length),
+      0
+    );
+    for (const string of strings) {
+      string.content = string.content.padEnd(maxLength, '-');
+    }
+  }
+
+  /**
+   * Tokenize a string body in a single pass. Every token advances the
+   * cursor by its full width, so a fret like 12 is consumed exactly once.
+   * @param {string} content - Aligned string body
+   * @returns {Array<Object>} Tokens with kind, col and len
+   * @private
+   */
+  tokenize(content) {
+    const tokens = [];
+    let pos = 0;
+
+    while (pos < content.length) {
+      const char = content[pos];
+
+      if (char === '|') {
+        tokens.push({ kind: 'bar', col: pos, len: 1 });
+        pos += 1;
+      } else if (/\d/.test(char)) {
+        let end = pos + 1;
+        while (end < content.length && /\d/.test(content[end])) end++;
+        const fret = parseInt(content.slice(pos, end), 10);
+        tokens.push({
+          kind: 'fret',
+          col: pos,
+          len: end - pos,
+          fret,
+          valid: fret <= MAX_FRET
+        });
+        pos = end;
+      } else if (char === 'x' || char === 'X') {
+        tokens.push({ kind: 'mute', col: pos, len: 1 });
+        pos += 1;
+      } else if (char === 'o' || char === 'O') {
+        tokens.push({ kind: 'fret', col: pos, len: 1, fret: 0, valid: true });
+        pos += 1;
+      } else if (char === '(') {
+        const match = content.slice(pos).match(/^\((\d{1,2})\)/);
+        if (match) {
+          const fret = parseInt(match[1], 10);
+          tokens.push({
+            kind: 'fret',
+            col: pos,
+            len: match[0].length,
+            fret,
+            valid: fret <= MAX_FRET,
+            ghost: true
+          });
+          pos += match[0].length;
+        } else {
+          pos += 1;
+        }
+      } else if (char === '<') {
+        const match = content.slice(pos).match(/^<(\d{1,2})>/);
+        if (match) {
+          const fret = parseInt(match[1], 10);
+          tokens.push({
+            kind: 'fret',
+            col: pos,
+            len: match[0].length,
+            fret,
+            valid: fret <= MAX_FRET,
+            harmonic: true
+          });
+          pos += match[0].length;
+        } else {
+          pos += 1;
+        }
+      } else if (TECH_SYMBOLS.has(char)) {
+        tokens.push({ kind: 'tech', col: pos, len: 1, symbol: char });
+        pos += 1;
+      } else {
+        pos += 1; // dash, space, colon or unknown character
+      }
+    }
+
+    return tokens;
+  }
+
+  /**
+   * Turn one string's tokens into notes, binding techniques to the notes
+   * they touch. A technique only applies when its symbol is part of an
+   * unbroken run of tokens with the note (no dashes in between), so a
+   * neighbouring note's digits or a nearby label can never leak in.
+   * @param {Array<Object>} tokens - Tokens from tokenize()
+   * @param {Object} string - String metadata (name, index)
+   * @returns {Array<Object>} Notes with techniques and details
+   * @private
+   */
+  buildNotes(tokens, string) {
+    const byStart = new Map();
+    const byEnd = new Map();
+    for (const token of tokens) {
+      byStart.set(token.col, token);
+      byEnd.set(token.col + token.len, token);
+    }
+
+    const absorbed = new Set();
+    const details = new Map();
+    const names = new Map();
+
+    const attach = (token, type, context, extra = {}) => {
+      if (!details.has(token)) {
+        details.set(token, []);
+        names.set(token, []);
+      }
+      details.get(token).push({ type, context, ...extra });
+      const name = TECH_NAMES[type] || type;
+      if (!names.get(token).includes(name)) {
+        names.get(token).push(name);
+      }
+    };
+
+    // Walk left/right through a contiguous token chain to the nearest fret.
+    const fretLeftOf = (token, skipAbsorbed = false) => {
+      let current = byEnd.get(token.col);
+      while (
+        current &&
+        (current.kind === 'tech' || (skipAbsorbed && absorbed.has(current)))
+      ) {
+        current = byEnd.get(current.col);
+      }
+      return current && current.kind === 'fret' && current.valid ? current : null;
+    };
+    const fretRightOf = token => {
+      let current = byStart.get(token.col + token.len);
+      while (current && current.kind === 'tech') {
+        current = byStart.get(current.col + current.len);
+      }
+      return current && current.kind === 'fret' && current.valid ? current : null;
+    };
+
+    for (const token of tokens) {
+      if (token.kind !== 'tech') continue;
+      const left = fretLeftOf(token);
+      const right = fretRightOf(token);
+
+      switch (token.symbol) {
+        case 'h':
+        case 'p': {
+          const type = token.symbol === 'h' ? 'hammer-on' : 'pull-off';
+          if (right && left) {
+            attach(right, type, `${type} from ${fretWord(left.fret)}`, {
+              fromFret: left.fret,
+              toFret: right.fret
+            });
+          } else if (right) {
+            attach(right, type, type);
+          } else if (left) {
+            attach(left, type, type);
+          }
+          break;
+        }
+        case 'b':
+        case '^': {
+          if (left && right) {
+            absorbed.add(right);
+            attach(left, 'bend', `bend up toward ${fretWord(right.fret)}`, {
+              toFret: right.fret
+            });
+          } else if (left || right) {
+            attach(left || right, 'bend', 'bend');
+          }
+          break;
+        }
+        case 'r': {
+          const owner = fretLeftOf(token, true);
+          if (right) absorbed.add(right);
+          if (owner) {
+            attach(
+              owner,
+              'release',
+              right ? `release back to ${fretWord(right.fret)}` : 'release',
+              right ? { toFret: right.fret } : {}
+            );
+          }
+          break;
+        }
+        case '/':
+        case '\\':
+        case 's': {
+          const type =
+            token.symbol === '/'
+              ? 'slide-up'
+              : token.symbol === '\\'
+                ? 'slide-down'
+                : 'slide';
+          const word = TECH_NAMES[type];
+          if (left && right) {
+            attach(left, type, `${word} to ${fretWord(right.fret)}`, {
+              toFret: right.fret
+            });
+          } else if (right) {
+            attach(right, type, `${word} into`);
+          } else if (left) {
+            attach(left, type, word);
+          }
+          break;
+        }
+        case '~':
+        case 'v': {
+          const target = left || right;
+          if (target) attach(target, 'vibrato', 'vibrato');
+          break;
+        }
+        case 't': {
+          const target = left || right;
+          if (target) attach(target, 'tap', 'tap');
+          break;
+        }
+        case '.': {
+          const target = left || right;
+          if (target) attach(target, 'staccato', 'staccato');
+          break;
+        }
+        case '>': {
+          const target = left || right;
+          if (target) attach(target, 'accent', 'accent');
+          break;
+        }
+      }
+    }
+
+    const notes = [];
+    for (const token of tokens) {
+      if (token.kind !== 'fret' && token.kind !== 'mute') continue;
+      if (token.kind === 'fret' && !token.valid) {
+        console.warn(`Skipping impossible fret number ${token.fret}`);
+        continue;
+      }
+      if (absorbed.has(token)) continue;
+
+      const techniques = [...(names.get(token) || [])];
+      const techniqueDetails = [...(details.get(token) || [])];
+      if (token.ghost) {
+        techniques.push('ghost note');
+        techniqueDetails.push({ type: 'ghost note', context: 'ghost note, played softly' });
+      }
+      if (token.harmonic) {
+        techniques.push('harmonic');
+        techniqueDetails.push({ type: 'harmonic', context: 'harmonic' });
+      }
+
+      notes.push({
+        string: string.name,
+        stringIndex: string.index,
+        fret: token.kind === 'mute' ? 'mute' : token.fret,
+        techniques,
+        techniqueDetails,
+        position: token.col
+      });
+    }
+
+    return notes;
+  }
+
+  /**
+   * Collect non-tab lines as annotations for the output summary.
+   * @param {Array<Object>} classified - Classified lines
+   * @returns {Array<Object>} Annotations with text and category
+   * @private
+   */
+  collectAnnotations(classified) {
+    const annotations = [];
+
+    for (const entry of classified) {
+      if (entry.type !== 'annotation') continue;
+      const text = entry.text;
+
+      let category = 'note';
+      if (/^\[.*\]$/.test(text) || /^[IVX]+\s*-/.test(text) ||
+          /^(intro|verse|chorus|bridge|solo|outro|pre-chorus|interlude)\b/i.test(text)) {
+        category = 'section';
+      } else if (text.includes('"')) {
+        category = 'lyrics';
+      } else if (/\d+:\d+/.test(text)) {
+        category = 'timing';
+      } else if (/repeat|times|x\d+/i.test(text)) {
+        category = 'instruction';
+      } else if (this.isChordNameLine(text)) {
+        category = 'chords';
+      }
+
+      annotations.push({
+        text: text.replace(/^\[/, '').replace(/\]$/, '').trim(),
+        lineNumber: entry.lineNumber,
+        category
+      });
+    }
+
+    return annotations;
   }
 }
