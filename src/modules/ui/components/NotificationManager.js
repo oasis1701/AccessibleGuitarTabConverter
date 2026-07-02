@@ -9,6 +9,9 @@ import { NOTIFICATION_TYPES, CSS_CLASSES, ANIMATION_DURATIONS } from '../../../u
  * Class to manage user notifications and screen reader announcements
  */
 export class NotificationManager {
+  /** Counter used to build unique dialog element ids. */
+  static dialogCounter = 0;
+
   /**
    * Create a NotificationManager instance
    */
@@ -154,17 +157,20 @@ export class NotificationManager {
   }
 
   /**
-   * Make an announcement to screen readers
+   * Make an announcement to screen readers. The text stays in the live
+   * region (wiping it too soon can cut the announcement off); clearing
+   * first and setting shortly after makes repeated identical messages
+   * announce again.
    * @param {string} message - Message to announce
    */
   announce(message) {
-    if (this.announcer) {
+    if (!this.announcer) return;
+
+    clearTimeout(this.announceTimer);
+    this.announcer.textContent = '';
+    this.announceTimer = setTimeout(() => {
       this.announcer.textContent = message;
-      // Force the screen reader to announce by clearing and resetting
-      setTimeout(() => {
-        this.announcer.textContent = '';
-      }, 100);
-    }
+    }, 50);
   }
 
   /**
@@ -182,6 +188,9 @@ export class NotificationManager {
     } = options;
 
     return new Promise((resolve) => {
+      const invoker = document.activeElement;
+      const dialogId = `dialog-${++NotificationManager.dialogCounter}`;
+
       // Create modal overlay
       const overlay = document.createElement('div');
       overlay.className = 'notification-overlay';
@@ -200,49 +209,64 @@ export class NotificationManager {
       const dialog = document.createElement('div');
       dialog.className = `notification-dialog ${type}`;
       dialog.setAttribute('role', 'dialog');
-      dialog.setAttribute('aria-labelledby', 'dialog-title');
-      dialog.setAttribute('aria-describedby', 'dialog-message');
-      dialog.innerHTML = `
-        <h3 id="dialog-title">${title}</h3>
-        <p id="dialog-message">${message}</p>
-        <div class="dialog-buttons">
-          <button class="btn btn-cancel">${cancelText}</button>
-          <button class="btn btn-confirm">${confirmText}</button>
-        </div>
-      `;
+      dialog.setAttribute('aria-modal', 'true');
+      dialog.setAttribute('aria-labelledby', `${dialogId}-title`);
+      dialog.setAttribute('aria-describedby', `${dialogId}-message`);
 
+      const heading = document.createElement('h3');
+      heading.id = `${dialogId}-title`;
+      heading.textContent = title;
+
+      const body = document.createElement('p');
+      body.id = `${dialogId}-message`;
+      body.textContent = message;
+
+      const buttons = document.createElement('div');
+      buttons.className = 'dialog-buttons';
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'btn btn-cancel';
+      cancelBtn.type = 'button';
+      cancelBtn.textContent = cancelText;
+      const confirmBtn = document.createElement('button');
+      confirmBtn.className = 'btn btn-confirm';
+      confirmBtn.type = 'button';
+      confirmBtn.textContent = confirmText;
+      buttons.append(cancelBtn, confirmBtn);
+
+      dialog.append(heading, body, buttons);
       overlay.appendChild(dialog);
       document.body.appendChild(overlay);
 
-      // Focus on cancel button
-      const cancelBtn = dialog.querySelector('.btn-cancel');
-      const confirmBtn = dialog.querySelector('.btn-confirm');
+      // Focus the safe choice first
       cancelBtn.focus();
 
-      // Handle button clicks
-      const cleanup = () => {
+      const close = (result) => {
+        document.removeEventListener('keydown', handleKeydown, true);
         document.body.removeChild(overlay);
+        // Give focus back to the element that opened the dialog, when it
+        // still exists (a confirmed delete may have removed it — the
+        // caller places focus in that case).
+        if (invoker && invoker.isConnected && typeof invoker.focus === 'function') {
+          invoker.focus();
+        }
+        resolve(result);
       };
 
-      cancelBtn.addEventListener('click', () => {
-        cleanup();
-        resolve(false);
-      });
+      cancelBtn.addEventListener('click', () => close(false));
+      confirmBtn.addEventListener('click', () => close(true));
 
-      confirmBtn.addEventListener('click', () => {
-        cleanup();
-        resolve(true);
-      });
-
-      // Handle escape key
-      const handleEscape = (e) => {
+      // Trap Tab inside the dialog and close on Escape
+      const handleKeydown = (e) => {
         if (e.key === 'Escape') {
-          cleanup();
-          resolve(false);
-          document.removeEventListener('keydown', handleEscape);
+          e.preventDefault();
+          close(false);
+        } else if (e.key === 'Tab') {
+          e.preventDefault();
+          const next = document.activeElement === cancelBtn ? confirmBtn : cancelBtn;
+          next.focus();
         }
       };
-      document.addEventListener('keydown', handleEscape);
+      document.addEventListener('keydown', handleKeydown, true);
     });
   }
 

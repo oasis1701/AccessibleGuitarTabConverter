@@ -121,13 +121,13 @@ class AccessibleGuitarTabsApp {
       this.convertBtn.disabled = this.tabInput.value.trim().length === 0;
     }, 100));
     
-    // Settings change handlers
+    // Settings change handlers. Re-convert without moving focus, so the
+    // user's position on the checkbox they just toggled is preserved.
     Object.values(this.settingsElements).forEach(element => {
       if (element) {
         element.addEventListener('change', () => {
           if (this.tabOutput.value) {
-            // Re-convert with new settings
-            this.convertTab();
+            this.convertTab({ moveFocus: false });
           }
         });
       }
@@ -136,49 +136,56 @@ class AccessibleGuitarTabsApp {
 
   /**
    * Convert tab to accessible format
+   * @param {Object} [options] - Conversion options
+   * @param {boolean} [options.moveFocus=true] - Move focus to the output
+   *   afterwards. Off for background re-conversions (settings changes).
    */
-  async convertTab() {
+  async convertTab({ moveFocus = true } = {}) {
     if (this.isConverting) return;
-    
+
     const input = this.tabInput.value.trim();
     if (!input) {
       notificationManager.warning('Please enter a guitar tab to convert.');
       return;
     }
-    
+
     this.isConverting = true;
     this.convertBtn.disabled = true;
     this.convertBtn.textContent = 'Converting...';
-    
+
     try {
       // Get current settings
       const settings = TabConverter.getSettingsFromElements(this.settingsElements);
-      
+
       // Convert the tab
       const converted = this.converter.convert(input, settings);
-      
+
       // Display result
       this.tabOutput.value = converted;
       this.copyBtn.disabled = false;
       if (this.saveBtn) {
         this.saveBtn.disabled = false;
       }
-      
-      notificationManager.success('Tab converted successfully!');
-      notificationManager.announce('Tab converted successfully. Check the output area.');
-      
-      // Focus output for screen readers
-      this.tabOutput.focus();
-      
+
+      if (moveFocus) {
+        notificationManager.success('Tab converted. The output area has the result.');
+        this.tabOutput.focus();
+      } else {
+        notificationManager.announce('Output updated with new settings.');
+      }
+
     } catch (error) {
       console.error('Conversion error:', error);
-      this.tabOutput.value = `Error converting tab: ${error.message}\n\nPlease check that your tab is in the correct format.`;
+      this.tabOutput.value = error.message;
       this.copyBtn.disabled = true;
       if (this.saveBtn) {
         this.saveBtn.disabled = true;
       }
-      
-      notificationManager.error('Error converting tab. Please check the format.');
+
+      notificationManager.error(error.message);
+      if (moveFocus) {
+        this.tabOutput.focus();
+      }
     } finally {
       this.isConverting = false;
       this.convertBtn.disabled = false;

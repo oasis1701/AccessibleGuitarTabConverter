@@ -5,7 +5,7 @@
 
 import { LocalStorage } from '../../storage/LocalStorage.js';
 import { notificationManager } from '../components/NotificationManager.js';
-import { formatDate, escapeHtml } from '../../../utils/helpers.js';
+import { formatDate } from '../../../utils/helpers.js';
 
 /**
  * Class to manage the My Tabs page
@@ -54,13 +54,6 @@ export class MyTabsPage {
       }
     });
 
-    // Keyboard navigation for table
-    if (this.tabsTable) {
-      this.tabsTable.addEventListener('keydown', (e) => {
-        this.handleTableKeyboard(e);
-      });
-    }
-
     // Listen for tab updates from Firebase sync
     window.addEventListener('tabsUpdated', () => {
       this.displaySavedTabs();
@@ -69,14 +62,17 @@ export class MyTabsPage {
 
   /**
    * Display saved tabs
+   * @param {Object} [options] - Display options
+   * @param {boolean} [options.announce=true] - Announce the tab count.
+   *   Off when the caller makes a more specific announcement itself.
    */
-  displaySavedTabs() {
+  displaySavedTabs({ announce = true } = {}) {
     const tabs = LocalStorage.getAllTabs();
-    
+
     if (tabs.length === 0) {
       this.showNoTabsMessage();
     } else {
-      this.showTabsList(tabs);
+      this.showTabsList(tabs, { announce });
     }
 
     // Update page title with count
@@ -95,8 +91,10 @@ export class MyTabsPage {
   /**
    * Show tabs list
    * @param {Array<Object>} tabs - Tabs to display
+   * @param {Object} [options] - Display options
+   * @param {boolean} [options.announce=true] - Announce the tab count
    */
-  showTabsList(tabs) {
+  showTabsList(tabs, { announce = true } = {}) {
     if (this.noTabsMessage) this.noTabsMessage.style.display = 'none';
     if (this.tabsContainer) this.tabsContainer.style.display = 'block';
     if (this.clearAllBtn) this.clearAllBtn.style.display = 'inline-block';
@@ -120,7 +118,9 @@ export class MyTabsPage {
     }
 
     // Announce to screen readers
-    notificationManager.announce(`Displaying ${tabs.length} saved tabs`);
+    if (announce) {
+      notificationManager.announce(`Displaying ${tabs.length} saved tabs`);
+    }
   }
 
   /**
@@ -178,6 +178,11 @@ export class MyTabsPage {
     const tab = LocalStorage.getTab(tabId);
     if (!tab) return;
 
+    // Remember where the row sits so focus can land on a neighbour after
+    // the row (and the Delete button that had focus) is removed.
+    const rows = this.tabsTbody ? [...this.tabsTbody.children] : [];
+    const rowIndex = rows.findIndex(r => r.dataset.tabId === tabId);
+
     const confirmed = await notificationManager.confirm(
       `Are you sure you want to delete "${tab.name}"?`,
       {
@@ -188,13 +193,42 @@ export class MyTabsPage {
       }
     );
 
-    if (confirmed) {
-      if (LocalStorage.deleteTab(tabId)) {
-        notificationManager.success(`Tab "${tab.name}" deleted`);
-        this.displaySavedTabs();
-      } else {
-        notificationManager.error('Failed to delete tab');
+    if (!confirmed) return;
+
+    if (LocalStorage.deleteTab(tabId)) {
+      this.displaySavedTabs({ announce: false });
+      const remaining = LocalStorage.getAllTabs().length;
+      notificationManager.success(
+        `Tab "${tab.name}" deleted. ${remaining} ${remaining === 1 ? 'tab' : 'tabs'} remaining.`
+      );
+      this.focusAfterRemoval(rowIndex);
+    } else {
+      notificationManager.error('Failed to delete tab');
+    }
+  }
+
+  /**
+   * Place focus sensibly after a row was removed: the delete button of
+   * the row now at the same position, or the section heading when the
+   * list is empty.
+   * @param {number} rowIndex - Index the removed row had
+   */
+  focusAfterRemoval(rowIndex) {
+    const rows = this.tabsTbody ? [...this.tabsTbody.children] : [];
+
+    if (rows.length > 0) {
+      const target = rows[Math.min(Math.max(rowIndex, 0), rows.length - 1)];
+      const focusable = target.querySelector('.delete-button') || target.querySelector('a, button');
+      if (focusable) {
+        focusable.focus();
+        return;
       }
+    }
+
+    const heading = document.querySelector('.tabs-header h2, main h2');
+    if (heading) {
+      heading.setAttribute('tabindex', '-1');
+      heading.focus();
     }
   }
 
@@ -217,8 +251,9 @@ export class MyTabsPage {
 
     if (confirmed) {
       if (LocalStorage.clearAllTabs()) {
-        notificationManager.success('All tabs cleared');
-        this.displaySavedTabs();
+        this.displaySavedTabs({ announce: false });
+        notificationManager.success('All tabs deleted.');
+        this.focusAfterRemoval(0);
       } else {
         notificationManager.error('Failed to clear tabs');
       }
@@ -249,31 +284,6 @@ export class MyTabsPage {
     URL.revokeObjectURL(url);
     
     notificationManager.success(`Exported "${tab.name}"`);
-  }
-
-  /**
-   * Handle keyboard navigation in the table
-   * @param {KeyboardEvent} e - Keyboard event
-   */
-  handleTableKeyboard(e) {
-    const target = e.target;
-    
-    // Handle arrow key navigation
-    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-      e.preventDefault();
-      
-      const row = target.closest('tr');
-      if (!row) return;
-      
-      const nextRow = e.key === 'ArrowUp' ? 
-        row.previousElementSibling : 
-        row.nextElementSibling;
-      
-      if (nextRow) {
-        const focusable = nextRow.querySelector('a, button');
-        if (focusable) focusable.focus();
-      }
-    }
   }
 
   /**

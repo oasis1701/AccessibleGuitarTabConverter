@@ -7,16 +7,17 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+    <a class="skip-link" href="#main-content">Skip to main content</a>
     <header>
         <nav class="top-nav">
             <a href="index.html" class="nav-link">← Home</a>
             <a href="converter.html" class="nav-link">New Tab</a>
         </nav>
         <h1>My Saved Tabs</h1>
-        <p>Your locally saved guitar tab conversions.</p>
+        <p>Your saved guitar tab conversions.</p>
     </header>
 
-    <main>
+    <main id="main-content">
         <section class="saved-tabs-section">
             <div class="tabs-header">
                 <h2>Saved Tabs</h2>
@@ -32,11 +33,12 @@
 
             <div id="tabs-container" class="tabs-container">
                 <table id="tabs-table" class="tabs-table">
+                    <caption class="sr-only">Saved tabs</caption>
                     <thead>
                         <tr>
-                            <th>Tab Name</th>
-                            <th>Date Saved</th>
-                            <th>Actions</th>
+                            <th scope="col">Tab Name</th>
+                            <th scope="col">Date Saved</th>
+                            <th scope="col">Actions</th>
                         </tr>
                     </thead>
                     <tbody id="tabs-tbody">
