@@ -3,7 +3,7 @@
  * @module utils/validators
  */
 
-import { PATTERNS, TAB_FORMATS } from './constants.js';
+import { DEFAULT_SETTINGS, PATTERNS, TAB_FORMATS } from './constants.js';
 
 /**
  * Characters that may appear in the musical body of a tab string line.
@@ -131,12 +131,9 @@ export function detectTabFormat(tabText) {
  * @returns {Object} Validated settings with defaults for missing values
  */
 export function validateSettings(settings) {
-  const validSettings = {
-    includeTiming: true,
-    verboseMode: true,
-    useStringNames: true,
-    includeTechniqueDetails: true
-  };
+  // Spread the defaults so this whitelist cannot drift out of sync with
+  // DEFAULT_SETTINGS when a new setting is added.
+  const validSettings = { ...DEFAULT_SETTINGS };
 
   if (settings && typeof settings === 'object') {
     // Only copy boolean values

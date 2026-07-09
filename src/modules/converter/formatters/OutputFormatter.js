@@ -36,7 +36,7 @@ export class OutputFormatter {
       for (let i = 0; i < stringCount; i++) {
         const stringName = settings.useStringNames && names
           ? names[i]
-          : `String ${stringCount - i}`;
+          : this.stringNumberLabel(stringCount - i);
 
         const fret = chord.frets[i];
 
@@ -103,12 +103,21 @@ export class OutputFormatter {
     let currentMeasure = 0;
 
     for (const event of sequence.notes) {
+      // Rest events (Guitar Pro imports only) are spoken pauses; without
+      // durations enabled they carry no information, so skip them before
+      // they can trigger a measure header.
+      if (event.isRest && !settings.includeDurations) {
+        continue;
+      }
+
       if (useMeasureHeaders && event.measure !== currentMeasure) {
         currentMeasure = event.measure;
         output += `\nMeasure ${currentMeasure}:\n`;
       }
 
-      if (event.isChord) {
+      if (event.isRest) {
+        output += `- Rest, ${event.duration}\n`;
+      } else if (event.isChord) {
         output += this.formatChord(event.notes, settings);
       } else {
         for (const note of event.notes) {
@@ -121,19 +130,31 @@ export class OutputFormatter {
   }
 
   /**
-   * Spoken name for a string ("high E string", "String 7").
+   * Ordinal spoken label for a 1-based string number ("3rd string" —
+   * screen readers speak it as "third string", matching how frets are
+   * phrased). String 1 is the high string, as guitarists count.
+   * @param {number} number - String number, 1 = highest
+   * @returns {string} Spoken label
+   * @private
+   */
+  stringNumberLabel(number) {
+    return `${number}${getOrdinalSuffix(number)} string`;
+  }
+
+  /**
+   * Spoken name for a string ("high E string", "7th string").
    * @param {Object} note - Note with string name and index
    * @param {Object} settings - Formatting settings
    * @returns {string} String description
    * @private
    */
   stringLabel(note, settings) {
-    if (!settings.useStringNames) {
-      return `String ${note.stringIndex + 1}`;
+    // Numbers mode, or a string the parser could not name (stored as
+    // "String N"), speaks the ordinal number instead.
+    if (!settings.useStringNames || note.string.startsWith('String')) {
+      return this.stringNumberLabel(note.stringIndex + 1);
     }
-    return note.string.startsWith('String')
-      ? note.string
-      : `${note.string} string`;
+    return `${note.string} string`;
   }
 
   /**
@@ -146,6 +167,21 @@ export class OutputFormatter {
     if (fret === 'mute') return 'muted';
     if (fret === 0) return 'open';
     return `${fret}${getOrdinalSuffix(fret)} fret`;
+  }
+
+  /**
+   * Duration suffix for a note (", eighth note"), or an empty string.
+   * Only Guitar Pro imports set note durations; ASCII tabs never do.
+   * @param {Object} note - Note that may carry a duration
+   * @param {Object} settings - Formatting settings
+   * @returns {string} Duration text
+   * @private
+   */
+  durationLabel(note, settings) {
+    if (!settings.includeDurations || !note.duration) {
+      return '';
+    }
+    return `, ${note.duration}`;
   }
 
   /**
@@ -181,6 +217,7 @@ export class OutputFormatter {
   formatNote(note, settings) {
     return (
       `- ${this.stringLabel(note, settings)}, ${this.fretLabel(note.fret)}` +
+      this.durationLabel(note, settings) +
       this.techniqueLabel(note, settings) +
       '\n'
     );
@@ -206,6 +243,9 @@ export class OutputFormatter {
         .join('-');
       chordDesc += `(${fretPattern})`;
     }
+
+    // All notes of a chord share their beat's duration; read the first.
+    chordDesc += this.durationLabel(notes[0], settings);
 
     if (settings.includeTechniqueDetails) {
       const seen = new Set();
@@ -246,6 +286,10 @@ export class OutputFormatter {
     }
 
     let summary = 'Tab Information:';
+
+    if (categories.song) {
+      summary += `\n- Song: ${categories.song.join(', ')}`;
+    }
 
     if (categories.section) {
       summary += `\n- Sections: ${categories.section.join(', ')}`;

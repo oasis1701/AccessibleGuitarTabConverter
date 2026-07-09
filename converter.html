@@ -33,6 +33,26 @@
             </div>
         </section>
 
+        <section class="import-section">
+            <h2>Or Import a Guitar Pro File</h2>
+            <label for="gp-file-input">Open a Guitar Pro file (.gp, .gp3, .gp4, .gp5, .gpx):</label>
+            <input
+                type="file"
+                id="gp-file-input"
+                accept=".gp,.gp3,.gp4,.gp5,.gpx"
+                aria-describedby="gp-file-help">
+            <div id="gp-file-help" class="help-text">
+                The file is read on this device only; nothing is uploaded. After it loads, pick a track if the song has more than one.
+            </div>
+            <div id="gp-track-picker" hidden>
+                <label for="gp-track-select">Choose a track to convert:</label>
+                <select id="gp-track-select"></select>
+                <button id="gp-convert-track-btn" type="button" class="convert-button">
+                    Convert Selected Track
+                </button>
+            </div>
+        </section>
+
         <section class="settings-section">
             <h2>Conversion Settings</h2>
             <fieldset>
@@ -52,6 +72,10 @@
                 <div class="checkbox-group">
                     <input type="checkbox" id="technique-details" checked>
                     <label for="technique-details">Include detailed technique descriptions</label>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="include-durations" checked>
+                    <label for="include-durations">Include note durations (Guitar Pro imports only)</label>
                 </div>
             </fieldset>
         </section>

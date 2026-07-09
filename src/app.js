@@ -7,9 +7,17 @@ import { TabConverter } from './modules/converter/TabConverter.js';
 import { LocalStorage } from './modules/storage/LocalStorage.js';
 import { notificationManager } from './modules/ui/components/NotificationManager.js';
 import { firebaseAuth } from './modules/auth/FirebaseAuth.js';
-import { getQueryParams, updateQueryParams, debounce } from './utils/helpers.js';
+import { getQueryParams, debounce } from './utils/helpers.js';
 import { validateConfig, isFeatureEnabled } from './config.js';
 import { ANIMATION_DURATIONS } from './utils/constants.js';
+
+/**
+ * Marker at the start of originalTab for tabs imported from Guitar Pro
+ * files. The binary file itself is never stored, so these tabs cannot be
+ * re-converted from the input area.
+ * @type {string}
+ */
+const GP_PROVENANCE_PREFIX = '[Imported from Guitar Pro';
 
 /**
  * Main application class
@@ -20,7 +28,17 @@ class AccessibleGuitarTabsApp {
     this.currentTab = null;
     this.settingsElements = {};
     this.isConverting = false;
-    
+
+    // Guitar Pro import state. The importer module (and alphaTab with it)
+    // is only dynamically imported once a file is actually opened.
+    this.gpImporter = null;
+    this.gpScore = null;
+    this.gpFileName = '';
+    this.gpTracks = [];
+    this.gpTabDataCache = new Map();
+    this.gpTrackIndex = null;
+    this.activeSource = 'text';
+
     this.init();
   }
 
@@ -80,13 +98,20 @@ class AccessibleGuitarTabsApp {
     this.convertBtn = document.getElementById('convert-btn');
     this.copyBtn = document.getElementById('copy-btn');
     this.saveBtn = document.getElementById('save-btn');
-    
+
+    // Guitar Pro import elements
+    this.gpFileInput = document.getElementById('gp-file-input');
+    this.gpTrackPicker = document.getElementById('gp-track-picker');
+    this.gpTrackSelect = document.getElementById('gp-track-select');
+    this.gpConvertTrackBtn = document.getElementById('gp-convert-track-btn');
+
     // Get settings elements
     this.settingsElements = {
       includeTiming: document.getElementById('include-timing'),
       verboseMode: document.getElementById('verbose-mode'),
       useStringNames: document.getElementById('string-names'),
-      includeTechniqueDetails: document.getElementById('technique-details')
+      includeTechniqueDetails: document.getElementById('technique-details'),
+      includeDurations: document.getElementById('include-durations')
     };
     
     // Bind events
@@ -116,22 +141,178 @@ class AccessibleGuitarTabsApp {
       this.saveBtn.addEventListener('click', () => this.saveTab());
     }
     
+    // Guitar Pro file import
+    if (this.gpFileInput) {
+      this.gpFileInput.addEventListener('change', () => this.onGpFileChosen());
+    }
+    if (this.gpConvertTrackBtn) {
+      this.gpConvertTrackBtn.addEventListener('click', () => {
+        this.convertGpTrack(Number(this.gpTrackSelect.value));
+      });
+    }
+
     // Enable/disable convert button based on input
     this.tabInput.addEventListener('input', debounce(() => {
       this.convertBtn.disabled = this.tabInput.value.trim().length === 0;
     }, 100));
-    
+
     // Settings change handlers. Re-convert without moving focus, so the
     // user's position on the checkbox they just toggled is preserved.
     Object.values(this.settingsElements).forEach(element => {
       if (element) {
         element.addEventListener('change', () => {
-          if (this.tabOutput.value) {
+          if (!this.tabOutput.value) return;
+          if (this.activeSource === 'gp' && this.gpScore && this.gpTrackIndex !== null) {
+            // Re-format the Guitar Pro track from its in-memory model.
+            this.convertGpTrack(this.gpTrackIndex, { moveFocus: false });
+          } else if (!this.convertBtn.disabled && this.tabInput.value.trim()) {
+            // Skipped for tabs loaded from a Guitar Pro import (the file
+            // was not stored, so there is nothing to re-convert).
             this.convertTab({ moveFocus: false });
           }
         });
       }
     });
+  }
+
+  /**
+   * Handle a chosen Guitar Pro file: load it, then convert directly or
+   * offer the track picker when the song has several usable tracks.
+   */
+  async onGpFileChosen() {
+    const file = this.gpFileInput.files && this.gpFileInput.files[0];
+    if (!file) return;
+
+    notificationManager.announce(`Loading ${file.name}...`);
+
+    let score;
+    try {
+      const buffer = await file.arrayBuffer();
+      if (!this.gpImporter) {
+        this.gpImporter = await import('./modules/converter/importers/GuitarProImporter.js');
+      }
+      score = this.gpImporter.loadScore(buffer);
+    } catch (error) {
+      console.error('Guitar Pro load error:', error);
+      const message = /Guitar Pro file/.test(error && error.message ? error.message : '')
+        ? error.message
+        : 'Could not read the file. Please try again.';
+      notificationManager.error(message);
+      this.gpFileInput.value = '';
+      return;
+    }
+
+    const tracks = this.gpImporter.listConvertibleTracks(score);
+    if (tracks.length === 0) {
+      notificationManager.error(
+        'No guitar or bass tracks were found in this file ' +
+          '(drums and non-stringed instruments cannot be converted).'
+      );
+      this.gpFileInput.value = '';
+      return;
+    }
+
+    // A new file starts a new document: never overwrite a previously
+    // loaded saved tab when this import is saved.
+    this.gpScore = score;
+    this.gpFileName = file.name;
+    this.gpTracks = tracks;
+    this.gpTabDataCache = new Map();
+    this.gpTrackIndex = null;
+    this.currentTab = null;
+
+    const { title } = this.gpImporter.describeScore(score);
+    const loadedName = title || file.name;
+
+    if (tracks.length === 1) {
+      this.gpTrackPicker.hidden = true;
+      this.gpTrackSelect.innerHTML = '';
+      notificationManager.success(
+        `Loaded ${loadedName}. Converting track: ${tracks[0].name || 'Untitled track'}.`
+      );
+      this.convertGpTrack(tracks[0].index);
+    } else {
+      this.populateTrackPicker(tracks);
+      notificationManager.success(
+        `Loaded ${loadedName}. ${tracks.length} guitar or bass tracks found. ` +
+          'Choose a track, then press Convert Selected Track.'
+      );
+      this.gpTrackSelect.focus();
+    }
+  }
+
+  /**
+   * Fill and reveal the track picker for a multi-track file.
+   * @param {Array<{index: number, name: string, stringCount: number}>} tracks
+   *   Convertible tracks
+   */
+  populateTrackPicker(tracks) {
+    this.gpTrackSelect.innerHTML = '';
+    for (const track of tracks) {
+      const option = document.createElement('option');
+      option.value = String(track.index);
+      option.textContent =
+        `Track ${track.index + 1}: ${track.name || 'Untitled track'} (${track.stringCount} strings)`;
+      this.gpTrackSelect.appendChild(option);
+    }
+    this.gpTrackPicker.hidden = false;
+  }
+
+  /**
+   * Convert one track of the loaded Guitar Pro score.
+   * @param {number} trackIndex - Index into the score's tracks
+   * @param {Object} [options] - Conversion options
+   * @param {boolean} [options.moveFocus=true] - Move focus to the output
+   *   afterwards. Off for background re-conversions (settings changes).
+   */
+  convertGpTrack(trackIndex, { moveFocus = true } = {}) {
+    if (this.isConverting || !this.gpScore || !this.gpImporter) return;
+
+    // Switching to another track starts a new document; saving it must not
+    // overwrite the tab saved from the previous track.
+    if (this.activeSource === 'gp' && this.gpTrackIndex !== null && this.gpTrackIndex !== trackIndex) {
+      this.currentTab = null;
+    }
+
+    this.isConverting = true;
+    try {
+      let tabData = this.gpTabDataCache.get(trackIndex);
+      if (!tabData) {
+        tabData = this.gpImporter.trackToTabData(this.gpScore, trackIndex);
+        this.gpTabDataCache.set(trackIndex, tabData);
+      }
+
+      const settings = TabConverter.getSettingsFromElements(this.settingsElements);
+      const converted = this.converter.formatTabData(tabData, settings);
+
+      this.tabOutput.value = converted;
+      this.copyBtn.disabled = false;
+      if (this.saveBtn) {
+        this.saveBtn.disabled = false;
+      }
+      this.activeSource = 'gp';
+      this.gpTrackIndex = trackIndex;
+
+      if (moveFocus) {
+        notificationManager.success('Track converted. The output area has the result.');
+        this.tabOutput.focus();
+      } else {
+        notificationManager.announce('Output updated with new settings.');
+      }
+    } catch (error) {
+      console.error('Guitar Pro conversion error:', error);
+      this.tabOutput.value = error.message;
+      this.copyBtn.disabled = true;
+      if (this.saveBtn) {
+        this.saveBtn.disabled = true;
+      }
+      notificationManager.error(error.message);
+      if (moveFocus) {
+        this.tabOutput.focus();
+      }
+    } finally {
+      this.isConverting = false;
+    }
   }
 
   /**
@@ -166,6 +347,8 @@ class AccessibleGuitarTabsApp {
       if (this.saveBtn) {
         this.saveBtn.disabled = false;
       }
+      // The output now reflects the pasted text, not a Guitar Pro track.
+      this.activeSource = 'text';
 
       if (moveFocus) {
         notificationManager.success('Tab converted. The output area has the result.');
@@ -224,29 +407,46 @@ class AccessibleGuitarTabsApp {
    * Save tab to storage
    */
   async saveTab() {
-    if (!this.tabInput.value.trim() || !this.tabOutput.value.trim()) {
+    // Guitar Pro imports have no pasted input; only the output matters.
+    const isGpImport = this.activeSource === 'gp';
+    if ((!isGpImport && !this.tabInput.value.trim()) || !this.tabOutput.value.trim()) {
       notificationManager.warning('Please convert a tab before saving.');
       return;
     }
-    
-    // Get tab name from user
-    const currentName = this.currentTab ? this.currentTab.name : '';
-    const tabName = prompt('Enter a name for this tab:', currentName);
-    
+
+    // Get tab name from user, suggesting the song title for imports
+    let suggestedName = this.currentTab ? this.currentTab.name : '';
+    if (!suggestedName && isGpImport) {
+      const { title } = this.gpImporter.describeScore(this.gpScore);
+      suggestedName = title || this.gpFileName.replace(/\.[^.]+$/, '');
+    }
+    const tabName = prompt('Enter a name for this tab:', suggestedName);
+
     if (tabName === null) return; // User cancelled
-    
+
     if (!tabName.trim()) {
       notificationManager.error('Please enter a valid tab name.');
       return;
     }
-    
+
     try {
       const settings = TabConverter.getSettingsFromElements(this.settingsElements);
-      
+
+      // The binary file is never stored; imported tabs keep a provenance
+      // line so My Tabs shows where the text came from.
+      let originalTab = this.tabInput.value;
+      if (isGpImport) {
+        const track = this.gpTracks.find(t => t.index === this.gpTrackIndex);
+        const trackName = (track && track.name) || 'Untitled track';
+        originalTab =
+          `${GP_PROVENANCE_PREFIX} file "${this.gpFileName}", ` +
+          `track ${this.gpTrackIndex + 1}: ${trackName}]`;
+      }
+
       const tabData = {
         id: this.currentTab?.id,
         name: tabName.trim(),
-        originalTab: this.tabInput.value,
+        originalTab,
         convertedTab: this.tabOutput.value,
         settings: settings,
         dateCreated: this.currentTab?.dateCreated
@@ -294,23 +494,36 @@ class AccessibleGuitarTabsApp {
   loadTab(tab) {
     this.tabInput.value = tab.originalTab;
     this.tabOutput.value = tab.convertedTab;
-    
+
+    // Tabs imported from Guitar Pro files store a provenance line, not a
+    // convertible tab, so re-converting them can only fail.
+    const isGpImport =
+      typeof tab.originalTab === 'string' && tab.originalTab.startsWith(GP_PROVENANCE_PREFIX);
+
     // Enable buttons
-    this.convertBtn.disabled = false;
+    this.convertBtn.disabled = isGpImport;
     this.copyBtn.disabled = false;
     if (this.saveBtn) {
       this.saveBtn.disabled = false;
     }
-    
+
     // Load settings
     if (tab.settings) {
       TabConverter.applySettingsToElements(tab.settings, this.settingsElements);
     }
-    
+
     // Set current tab reference
     this.currentTab = tab;
-    
-    notificationManager.info(`Loaded tab: ${tab.name}`);
+    this.activeSource = 'text';
+
+    if (isGpImport) {
+      notificationManager.info(
+        `Loaded tab: ${tab.name}. This tab was imported from a Guitar Pro file; ` +
+          'the converted text is shown, and the original file was not stored.'
+      );
+    } else {
+      notificationManager.info(`Loaded tab: ${tab.name}`);
+    }
   }
 
   /**

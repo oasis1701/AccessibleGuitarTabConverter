@@ -113,7 +113,8 @@ export const DEFAULT_SETTINGS = {
   includeTiming: true,
   verboseMode: true,
   useStringNames: true,
-  includeTechniqueDetails: true
+  includeTechniqueDetails: true,
+  includeDurations: true
 };
 
 /**

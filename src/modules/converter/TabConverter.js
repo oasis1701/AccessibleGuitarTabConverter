@@ -98,6 +98,18 @@ export class TabConverter {
   }
 
   /**
+   * Format an already-parsed tab model into accessible text. Used by the
+   * Guitar Pro import path, which produces the same { sequences,
+   * annotations } model as the ASCII parser but from file data.
+   * @param {Object} tabData - Parsed tab data
+   * @param {Object} settings - Conversion settings
+   * @returns {string} Converted accessible format
+   */
+  formatTabData(tabData, settings = {}) {
+    return this.outputFormatter.formatTablature(tabData, validateSettings(settings));
+  }
+
+  /**
    * Get current conversion settings
    * @param {Object} settingsElements - Object containing setting element references
    * @returns {Object} Current settings

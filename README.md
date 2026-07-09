@@ -1,6 +1,6 @@
 # Accessible Guitar Tab Converter
 
-A web app that converts ASCII guitar tablature into screen-reader-friendly text. Built by and for blind guitarists: instead of a visual grid of dashes and numbers, you get sequential descriptions like:
+A web app that converts ASCII guitar tablature and Guitar Pro files into screen-reader-friendly text. Built by and for blind guitarists: instead of a visual grid of dashes and numbers, you get sequential descriptions like:
 
 ```
 Section 1 (Intro), 2 measures:
@@ -18,11 +18,18 @@ Live site: https://oasis1701.github.io/AccessibleGuitarTabConverter/
 ## Using the app
 
 1. Open **converter.html** (the "New Tab Conversion" link on the home page).
-2. Paste a plain-text guitar tab into the input box.
-3. Press **Convert Tab to Accessible Format** (or Control+Enter).
+2. Paste a plain-text guitar tab into the input box, or use **Or Import a Guitar Pro File** to open a `.gp`, `.gp3`, `.gp4`, `.gp5` or `.gpx` file.
+3. Press **Convert Tab to Accessible Format** (or Control+Enter). Guitar Pro files with one guitar or bass track convert as soon as they load; files with several tracks announce a track picker — choose a track, then press **Convert Selected Track**. You can convert another track from the same file without reopening it.
 4. Focus moves to the read-only output box; arrow through it line by line.
 5. **Save Tab** (Control+S) stores it in your browser; **Copy to Clipboard** (Control+Shift+C) copies the result.
 6. **My Tabs** lists saved tabs in a table with Open, Delete and Export actions.
+
+### Guitar Pro import
+
+- Reads all common Guitar Pro formats — `.gp3`, `.gp4`, `.gp5`, `.gpx` (Guitar Pro 6) and `.gp` (Guitar Pro 7/8) — using the [alphaTab](https://alphatab.net) music engine (MPL-2.0), which is loaded on demand the first time you open a file. Files are read entirely on your device; nothing is uploaded.
+- Drum and other non-stringed tracks are filtered out of the track picker.
+- Guitar Pro files carry more information than ASCII tabs, and the output uses it: song title and artist, real section names, tempo and time-signature changes, capo, non-standard tunings, repeats ("Measures 5 to 8 repeat, play 2 times"), rests, and exact note durations ("B string, 5th fret, eighth note").
+- Saving an imported tab stores the converted text plus a note about which file and track it came from; the binary file itself is never stored, so reopening a saved import shows the text without a re-convert option.
 
 ### What the parser understands
 
@@ -37,12 +44,13 @@ Live site: https://oasis1701.github.io/AccessibleGuitarTabConverter/
 
 ### Output settings
 
-Four checkboxes on the converter page, all on by default:
+Five checkboxes on the converter page, all on by default:
 
 - **Include annotations** — tab information summary and section names
 - **Verbose descriptions** — full sentences vs. compact `(3-1-0-2-3-x)` chord patterns
-- **Use string names** — "high E string" vs. "String 1"
+- **Use string names** — "high E string" vs. "1st string" (string 1 is the high E, as guitarists count)
 - **Detailed techniques** — technique descriptions on each note
+- **Include note durations** — spoken rhythm ("eighth note", "dotted quarter rest") on Guitar Pro imports; pasted ASCII tabs carry no rhythm, so it does not affect them
 
 ## Cloud sync (optional)
 
@@ -76,7 +84,8 @@ src/app.js                                 page wiring, shortcuts, save/copy
 src/config.js                              Firebase config + feature flags
 src/firebase-loader.js                     resolves when the Firebase CDN SDK is ready
 src/modules/converter/                     TabConverter, StandardTabParser,
-                                           ChordParser, OutputFormatter (+ tests)
+                                           ChordParser, OutputFormatter,
+                                           GuitarProImporter (+ tests)
 src/modules/storage/                       LocalStorage wrapper, mergeTabs (+ tests)
 src/modules/auth/FirebaseAuth.js           sign-in UI and cloud sync
 src/modules/ui/                            NotificationManager (announcements,

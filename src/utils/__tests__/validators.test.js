@@ -93,7 +93,8 @@ describe('validateSettings', () => {
       includeTiming: true,
       verboseMode: true,
       useStringNames: true,
-      includeTechniqueDetails: true
+      includeTechniqueDetails: true,
+      includeDurations: true
     });
   });
 
@@ -101,6 +102,10 @@ describe('validateSettings', () => {
     const result = validateSettings({ verboseMode: false, includeTiming: 'nope' });
     expect(result.verboseMode).toBe(false);
     expect(result.includeTiming).toBe(true);
+  });
+
+  it('passes includeDurations through', () => {
+    expect(validateSettings({ includeDurations: false }).includeDurations).toBe(false);
   });
 });
 

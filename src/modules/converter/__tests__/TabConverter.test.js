@@ -49,7 +49,7 @@ describe('end-to-end conversion', () => {
       useStringNames: false
     });
     expect(out).not.toContain('undefined');
-    expect(out).toContain('String 7');
+    expect(out).toContain('7th string');
   });
 
   it('handles the 8-string tab in both naming modes', () => {
@@ -60,7 +60,7 @@ describe('end-to-end conversion', () => {
       ...defaults,
       useStringNames: false
     });
-    expect(withNumbers).toContain('String 8');
+    expect(withNumbers).toContain('8th string');
     expect(withNumbers).not.toContain('undefined');
   });
 
