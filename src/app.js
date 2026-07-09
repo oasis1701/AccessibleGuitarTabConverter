@@ -103,7 +103,6 @@ class AccessibleGuitarTabsApp {
     this.gpFileInput = document.getElementById('gp-file-input');
     this.gpTrackPicker = document.getElementById('gp-track-picker');
     this.gpTrackSelect = document.getElementById('gp-track-select');
-    this.gpConvertTrackBtn = document.getElementById('gp-convert-track-btn');
 
     // Get settings elements
     this.settingsElements = {
@@ -116,7 +115,8 @@ class AccessibleGuitarTabsApp {
     
     // Bind events
     this.bindConverterEvents();
-    
+    this.updateConvertControls();
+
     // Load tab from URL if specified
     await this.loadTabFromUrl();
     
@@ -130,30 +130,43 @@ class AccessibleGuitarTabsApp {
    * Bind converter page events
    */
   bindConverterEvents() {
-    // Convert button
-    this.convertBtn.addEventListener('click', () => this.convertTab());
-    
+    // The one Convert button converts whichever source was used last
+    this.convertBtn.addEventListener('click', () => this.onConvertPressed());
+
     // Copy button
     this.copyBtn.addEventListener('click', () => this.copyToClipboard());
-    
+
     // Save button
     if (this.saveBtn) {
       this.saveBtn.addEventListener('click', () => this.saveTab());
     }
-    
+
     // Guitar Pro file import
     if (this.gpFileInput) {
       this.gpFileInput.addEventListener('change', () => this.onGpFileChosen());
     }
-    if (this.gpConvertTrackBtn) {
-      this.gpConvertTrackBtn.addEventListener('click', () => {
-        this.convertGpTrack(Number(this.gpTrackSelect.value));
+    if (this.gpTrackSelect) {
+      // Touching the track list makes the Guitar Pro file the active
+      // source again; Enter on it converts without leaving the list.
+      this.gpTrackSelect.addEventListener('change', () => {
+        this.activeSource = 'gp';
+        this.updateConvertControls();
+      });
+      this.gpTrackSelect.addEventListener('keydown', event => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          this.onConvertPressed();
+        }
       });
     }
 
-    // Enable/disable convert button based on input
+    // Typing in the paste box makes it the active source and controls
+    // whether the Convert button is available in text mode.
     this.tabInput.addEventListener('input', debounce(() => {
-      this.convertBtn.disabled = this.tabInput.value.trim().length === 0;
+      if (this.tabInput.value.trim().length > 0) {
+        this.activeSource = 'text';
+      }
+      this.updateConvertControls();
     }, 100));
 
     // Settings change handlers. Re-convert without moving focus, so the
@@ -173,6 +186,39 @@ class AccessibleGuitarTabsApp {
         });
       }
     });
+  }
+
+  /**
+   * Convert whichever source was used last: the selected track of a
+   * loaded Guitar Pro file, or the pasted text.
+   */
+  onConvertPressed() {
+    if (this.activeSource === 'gp' && this.gpScore) {
+      const trackIndex =
+        this.gpTrackPicker && !this.gpTrackPicker.hidden && this.gpTrackSelect.options.length > 0
+          ? Number(this.gpTrackSelect.value)
+          : this.gpTrackIndex;
+      if (trackIndex !== null && !Number.isNaN(trackIndex)) {
+        this.convertGpTrack(trackIndex);
+        return;
+      }
+    }
+    this.convertTab();
+  }
+
+  /**
+   * Keep the one Convert button truthful about what it will do: its
+   * label names the active source, and it is only disabled when that
+   * source has nothing to convert.
+   */
+  updateConvertControls() {
+    if (!this.convertBtn) return;
+
+    const gpReady = this.activeSource === 'gp' && Boolean(this.gpScore);
+    this.convertBtn.textContent = gpReady
+      ? 'Convert Selected Guitar Pro Track'
+      : 'Convert Tab to Accessible Format';
+    this.convertBtn.disabled = gpReady ? false : this.tabInput.value.trim().length === 0;
   }
 
   /**
@@ -220,6 +266,7 @@ class AccessibleGuitarTabsApp {
     this.gpTabDataCache = new Map();
     this.gpTrackIndex = null;
     this.currentTab = null;
+    this.activeSource = 'gp';
 
     const { title } = this.gpImporter.describeScore(score);
     const loadedName = title || file.name;
@@ -233,9 +280,10 @@ class AccessibleGuitarTabsApp {
       this.convertGpTrack(tracks[0].index);
     } else {
       this.populateTrackPicker(tracks);
+      this.updateConvertControls();
       notificationManager.success(
         `Loaded ${loadedName}. ${tracks.length} guitar or bass tracks found. ` +
-          'Choose a track, then press Convert Selected Track.'
+          'Choose a track, then press Enter to convert it.'
       );
       this.gpTrackSelect.focus();
     }
@@ -275,6 +323,8 @@ class AccessibleGuitarTabsApp {
     }
 
     this.isConverting = true;
+    this.convertBtn.disabled = true;
+    this.convertBtn.textContent = 'Converting...';
     try {
       let tabData = this.gpTabDataCache.get(trackIndex);
       if (!tabData) {
@@ -312,6 +362,7 @@ class AccessibleGuitarTabsApp {
       }
     } finally {
       this.isConverting = false;
+      this.updateConvertControls();
     }
   }
 
@@ -371,8 +422,7 @@ class AccessibleGuitarTabsApp {
       }
     } finally {
       this.isConverting = false;
-      this.convertBtn.disabled = false;
-      this.convertBtn.textContent = 'Convert Tab to Accessible Format';
+      this.updateConvertControls();
     }
   }
 
@@ -501,7 +551,6 @@ class AccessibleGuitarTabsApp {
       typeof tab.originalTab === 'string' && tab.originalTab.startsWith(GP_PROVENANCE_PREFIX);
 
     // Enable buttons
-    this.convertBtn.disabled = isGpImport;
     this.copyBtn.disabled = false;
     if (this.saveBtn) {
       this.saveBtn.disabled = false;
@@ -515,6 +564,10 @@ class AccessibleGuitarTabsApp {
     // Set current tab reference
     this.currentTab = tab;
     this.activeSource = 'text';
+    this.updateConvertControls();
+    if (isGpImport) {
+      this.convertBtn.disabled = true;
+    }
 
     if (isGpImport) {
       notificationManager.info(
@@ -584,7 +637,7 @@ class AccessibleGuitarTabsApp {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
         if (this.convertBtn && !this.convertBtn.disabled) {
-          this.convertTab();
+          this.onConvertPressed();
         }
       }
       

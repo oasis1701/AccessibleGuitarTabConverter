@@ -19,7 +19,7 @@ Live site: https://oasis1701.github.io/AccessibleGuitarTabConverter/
 
 1. Open **converter.html** (the "New Tab Conversion" link on the home page).
 2. Paste a plain-text guitar tab into the input box, or use **Or Import a Guitar Pro File** to open a `.gp`, `.gp3`, `.gp4`, `.gp5` or `.gpx` file.
-3. Press **Convert Tab to Accessible Format** (or Control+Enter). Guitar Pro files with one guitar or bass track convert as soon as they load; files with several tracks announce a track picker — choose a track, then press **Convert Selected Track**. You can convert another track from the same file without reopening it.
+3. Press the **Convert** button (or Control+Enter). There is one Convert button and it always converts whatever you used last — its label says which: "Convert Tab to Accessible Format" for pasted text, "Convert Selected Guitar Pro Track" while a file is active. Guitar Pro files with one guitar or bass track convert as soon as they load; files with several tracks land focus on a track list — pick a track and press Enter to convert it. You can convert another track from the same file without reopening it.
 4. Focus moves to the read-only output box; arrow through it line by line.
 5. **Save Tab** (Control+S) stores it in your browser; **Copy to Clipboard** (Control+Shift+C) copies the result.
 6. **My Tabs** lists saved tabs in a table with Open, Delete and Export actions.
